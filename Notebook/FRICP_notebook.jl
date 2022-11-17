@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.19.14
+# v0.19.15
 
 using Markdown
 using InteractiveUtils
@@ -11,6 +11,8 @@ begin
 	using StaticArrays
 	using Flux3D
 	using Rotations
+	using ProfileCanvas
+	using Test
 end
 
 # ╔═╡ 5436358a-86ed-4724-a4b1-58ed3cb18d32
@@ -27,11 +29,21 @@ R = rand(RotMatrix{3,Float32})
 # ╔═╡ 519dcc88-22d6-4ccd-b69e-6c8f75b9617f
 t = @SMatrix rand(Float32,3,1)
 
-# ╔═╡ d17d89a4-d987-40be-9359-f29ee5e3b9df
-supertypes(Vector)
-
 # ╔═╡ 191c1a65-d627-4595-88df-d5b5c73edcdf
 md"## Parameters"
+
+# ╔═╡ 654f8ec6-ee3a-4570-b122-03cab1955c47
+begin
+ν₁ = 1.0; ν₂ = 1.0; 			# Dynamic Welsch Paras
+end;
+
+# ╔═╡ c462804d-5ea6-4fb7-baf9-861c9c961fe7
+md"## FRICP"
+
+# ╔═╡ 2350385e-81e0-47ce-b13d-0cbbbfed4894
+function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,D}},param) where {T<:Number,D}
+	
+end
 
 # ╔═╡ f39ff907-bc7c-49bd-b813-65ad03f4b190
 md"## Functions"
@@ -53,7 +65,7 @@ end
     PC2SVector(PC)
 Convert a point cloud to array of StaticMatrices
 """
-function PC2SVector(PC::Array{T, 3}) where {T<:Number}
+function PC2SVector(PC::Matrix{T}) where {T<:Number}
     n = size(PC,2);
     PCVec = Array{SMatrix{3,1,T,3}}(undef,n)
     Threads.@threads for i = 1:n
@@ -62,20 +74,6 @@ function PC2SVector(PC::Array{T, 3}) where {T<:Number}
     return PCVec
 end
 
-
-# ╔═╡ b0ef0120-4385-457f-8104-217de22ba4fa
-begin
-	PC, N = load_PC("../Assets/dolphin.obj")
-	Flux3D.normalize!(PC)
-	source = PC2SVector(PC.points);
-	Tree = KDTree(PC.points[:,:,1])
-end;
-
-# ╔═╡ 654f8ec6-ee3a-4570-b122-03cab1955c47
-begin
-ν₁ = 1.0; ν₂ = 1.0; 			# Dynamic Welsch Paras
-W = -ones(Int64,N); 			# Closest Point Indices
-end;
 
 # ╔═╡ ec83c06c-7480-4b27-8f42-b0794330657a
 """
@@ -91,16 +89,46 @@ function SVector2PC(P::Vector{SMatrix{3,1,T,3}}) where {T<:Number}
 	return PC
 end
 
+# ╔═╡ b0ef0120-4385-457f-8104-217de22ba4fa
+begin
+	PC, N = load_PC("../Assets/dolphin.obj")
+	Flux3D.normalize!(PC)
+	source = PC2SVector(PC.points[:,:,1]);
+	# mean = sum(source)/N
+	# source = source .- [mean]
+	Tree = KDTree(SVector2PC(source))
+end;
+
 # ╔═╡ 0388e7b0-95d7-46b9-9a37-00180052d6dc
 """
-	get_pc_closest_point(PC,Tree,W)
+	get_pc_closest_point(PC,Tree)
+Find the index & point coordiante of the closest point for each point in `P::Vector{SMatrix}` from KDTree `Tree::KDTree`. The indices are filled in `W`. Points are assigned in `Q`
+"""
+function get_pc_closest_point(P::Vector{SMatrix{3,1,T,3}},Tree) where{T}
+	n = size(P,1)
+	Q = Array{SMatrix{3,1,T,3}}(undef,n)
+	W = zeros(n)
+	Threads.@threads for i = 1:n
+		@inbounds idx = nn(Tree,P[i])[1][1]
+		@inbounds W[i] = idx
+		@inbounds Q[i] = P[idx]
+	end
+	return Q,W
+end
+
+# ╔═╡ bc29f7cd-5f96-491f-ac03-dd0f01f574ae
+"""
+	get_pc_closest_point_id(PC,Tree,W)
 Find the index of the closest point for each point in `P::Vector{SMatrix}` from KDTree `Tree::KDTree`. The indices are filled in `W`
 """
-function get_pc_closest_point(P::Vector{SMatrix{3,1,T,3}},KDTree::KDTree,W::Vector) where{T}
+function get_pc_closest_point_id(P::Vector{SMatrix{3,1,T,3}},Tree) where{T}
 	n = size(P,1)
+	W = zeros(n)
 	Threads.@threads for i = 1:n
-		@inbounds W[i] = nn(KDTree,P[i])[1][1]
+		@inbounds idx = nn(Tree,P[i])[1][1]
+		@inbounds W[i] = idx
 	end
+	return W
 end
 
 # ╔═╡ 1e902be5-c98d-421a-8ef4-7294e6855640
@@ -123,7 +151,7 @@ end
 target = transform_PC(source,R,t)
 
 # ╔═╡ 8d7144cc-d006-4ffa-9f1e-6a91c7acd925
-get_pc_closest_point(target, KDTree, W)
+Q,W = get_pc_closest_point(target, Tree)
 
 # ╔═╡ 8a7ce52a-403f-45e7-b9b8-b4b5b46c69ac
 """
@@ -140,8 +168,92 @@ function transform_PC!(PC::Vector{SMatrix{3,1,T,3}}, R::T₂, t::T₃) where {T<
 	end
 end
 
-# ╔═╡ fbdbf4fd-bd9e-4844-890a-a7731279089d
+# ╔═╡ 65e95d65-c0ec-4568-a52e-3b9242f68494
+"""
+	rt2T(R,t)
+Combine a rotation matrix `R` and a translation vector `t` to a homogenous matrix `T`
+"""
+function rt2T(R::T₁,t::SMatrix{D,1,T,D}) where {D,T₁<:AbstractMatrix,T<:Number}
+	row = zeros(1,D+1); row[1,D+1] = T(1.0);
+	row = SMatrix{1,D+1,T,D+1}(row);
+	return vcat(hcat(R,t),row)
+end
 
+# ╔═╡ fbdbf4fd-bd9e-4844-890a-a7731279089d
+"""
+	P2P_ICP(source,target, w)
+Point to Point ICP with SVD. **Points in source and points in target are listed correspoindingly, given weight `w`**
+"""
+function P2P_ICP(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,D}},w::Vector{T}=ones(T,size(source,1))) where {T<:Number,D}
+	wₙ = w/sum(w);
+	X = deepcopy(source); Y = deepcopy(target)
+	meanₛ = sum(X.*wₙ);X = X.-[meanₛ];
+	meanₜ = sum(Y.*wₙ);Y = Y.-[meanₜ];
+	X = SVector2PC(X); Y = SVector2PC(Y);
+	Σ = X * diagm(wₙ) * Y'
+	F = svd(Σ);
+	U = SMatrix{D,D,T,D*D}(F.U);
+	V = SMatrix{D,D,T,D*D}(F.V);
+	if det(U)*det(V) < 0
+		s = ones(T,D); s[-1] = -s[-1];
+		S = SMatrix{D,D,T,D*D}(diagm(s))
+		R = V*S*U';
+	else
+		R = V*U';
+	end
+	t = meanₜ-R*meanₛ
+	X = PC2SVector(X).+ [meanₛ]; Y = PC2SVector(Y).+ [meanₜ];
+	return rt2T(R,t)
+end
+
+# ╔═╡ ca4090d5-ca8d-4045-8c56-49636198cf00
+@test norm(P2P_ICP(source,target,ones(Float32,1000))-rt2T(R,t))<1e-5
+
+# ╔═╡ f6d3e02b-0628-46f4-ac18-2027be4c3e50
+norm.(source.-target)
+
+# ╔═╡ 26fece0f-2e3c-4966-81fa-ce794b2079c6
+begin
+	function tukey_energy(r::Vector{T},p) where {T}
+		r = (1 .-(r./p).^2).^2;
+		r[r.>p] = T(0.0);
+		return r
+	end
+	function trimmed_energy(r::Vector{T},p) where {T}
+		return zeros(T,size(r,1))
+		## TODO: finish trimmed_energy function
+	end
+	fair_energy(r,p) = @inline sum(r.^2) ./ (1 .+r./p);
+	logistic_energy(r,p) = @inline sum(r.^2 .*(p./r)*tanh.(r./p));
+	welsch_energy(r,p) = @inline sum(1.0.-exp.(-r.^2 ./(2 .*p.*p)));
+	autowelsch_energy(r::Vector{T},p) where {T} = welsch_energy(r,T(0.5));
+	uniform_energy(r::Vector{T}) where {T} = @inline ones(T,size(r,1))
+end;
+
+# ╔═╡ 53f8e4b5-d39b-44a6-b8d7-017a94883293
+"""
+	get_energy(W,ν₁,f)
+get point cloud error energy given error `W`, parameter `ν₁`, with function specified by `f`
+"""
+function get_energy(W,ν₁,f)
+	if f == "tukey"
+		return tukey_energy(W,ν₁)
+	elseif f == "fair"
+		return fair_energy(W,ν₁)
+	elseif f == "log"
+		return logistic_energy(W,ν₁)
+	elseif f == "trimmed"
+		return trimmed_energy(W,ν₁)
+	elseif f == "welsch"
+		return welsch_energy(W,ν₁)
+	elseif f == "auto_welsch"
+		return autowelsch_energy(W,ν₁)
+	elseif f == "uniform"
+		return uniform_energy(W)
+	else
+		return uniform_energy(W)
+	end
+end
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -150,14 +262,17 @@ BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 Flux3D = "432009dd-59a1-4b72-8c93-6462ce9b220f"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 NearestNeighbors = "b8a86587-4115-5ab1-83bc-aa920d37bbce"
+ProfileCanvas = "efd6af41-a80b-495e-886c-e51b0c7d77a3"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
 BenchmarkTools = "~1.3.2"
 Flux3D = "~0.1.6"
 NearestNeighbors = "~0.4.12"
+ProfileCanvas = "~0.1.6"
 Rotations = "~1.3.3"
 StaticArrays = "~1.5.9"
 """
@@ -166,8 +281,9 @@ StaticArrays = "~1.5.9"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.7.3"
+julia_version = "1.8.2"
 manifest_format = "2.0"
+project_hash = "e1208f72356885eb5aaae0d734b33134c66d9599"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -188,6 +304,7 @@ version = "3.4.0"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
+version = "1.1.1"
 
 [[deps.ArrayInterface]]
 deps = ["IfElse", "LinearAlgebra", "Requires", "SparseArrays", "Static"]
@@ -281,6 +398,7 @@ version = "4.3.0"
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
+version = "0.5.2+0"
 
 [[deps.DataAPI]]
 git-tree-sha1 = "e08915633fcb3ea83bf9d6126292e5bc5c739922"
@@ -349,6 +467,7 @@ version = "0.9.2"
 [[deps.Downloads]]
 deps = ["ArgTools", "FileWatching", "LibCURL", "NetworkOptions"]
 uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
+version = "1.6.0"
 
 [[deps.DualNumbers]]
 deps = ["Calculus", "NaNMath", "SpecialFunctions"]
@@ -531,10 +650,12 @@ uuid = "4af54fe1-eca0-43a8-85a7-787d91b784e3"
 [[deps.LibCURL]]
 deps = ["LibCURL_jll", "MozillaCACerts_jll"]
 uuid = "b27032c2-a3e7-50c8-80cd-2d36dbcbfd21"
+version = "0.6.3"
 
 [[deps.LibCURL_jll]]
 deps = ["Artifacts", "LibSSH2_jll", "Libdl", "MbedTLS_jll", "Zlib_jll", "nghttp2_jll"]
 uuid = "deac9b47-8bc7-5906-a0fe-35ac56dc84c0"
+version = "7.84.0+0"
 
 [[deps.LibGit2]]
 deps = ["Base64", "NetworkOptions", "Printf", "SHA"]
@@ -543,6 +664,7 @@ uuid = "76f85450-5226-5b5a-8eaa-529ad045b433"
 [[deps.LibSSH2_jll]]
 deps = ["Artifacts", "Libdl", "MbedTLS_jll"]
 uuid = "29816b5a-b9ab-546f-933c-edad1886dfa8"
+version = "1.10.2+0"
 
 [[deps.Libdl]]
 uuid = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
@@ -573,6 +695,7 @@ uuid = "d6f4376e-aef5-505a-96c1-9c027394607a"
 [[deps.MbedTLS_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "c8ffd9c3-330d-5841-b78e-0817d7145fa1"
+version = "2.28.0+0"
 
 [[deps.Media]]
 deps = ["MacroTools", "Test"]
@@ -603,6 +726,7 @@ uuid = "a63ad114-7e13-5084-954f-fe012c677804"
 
 [[deps.MozillaCACerts_jll]]
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
+version = "2022.2.1"
 
 [[deps.NNlib]]
 deps = ["Adapt", "ChainRulesCore", "LinearAlgebra", "Pkg", "Requires", "Statistics"]
@@ -630,14 +754,17 @@ version = "0.4.12"
 
 [[deps.NetworkOptions]]
 uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
+version = "1.2.0"
 
 [[deps.OpenBLAS_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Libdl"]
 uuid = "4536629a-c528-5b80-bd46-f80d51c5b363"
+version = "0.3.20+0"
 
 [[deps.OpenLibm_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "05823500-19ac-5b8b-9628-191a04bc5112"
+version = "0.8.1+0"
 
 [[deps.OpenSpecFun_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Pkg"]
@@ -665,6 +792,7 @@ version = "2.5.0"
 [[deps.Pkg]]
 deps = ["Artifacts", "Dates", "Downloads", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "REPL", "Random", "SHA", "Serialization", "TOML", "Tar", "UUIDs", "p7zip_jll"]
 uuid = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+version = "1.8.0"
 
 [[deps.Preferences]]
 deps = ["TOML"]
@@ -679,6 +807,12 @@ uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 [[deps.Profile]]
 deps = ["Printf"]
 uuid = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
+
+[[deps.ProfileCanvas]]
+deps = ["Base64", "JSON", "Pkg", "Profile", "REPL"]
+git-tree-sha1 = "e42571ce9a614c2fbebcaa8aab23bbf8865c624e"
+uuid = "efd6af41-a80b-495e-886c-e51b0c7d77a3"
+version = "0.1.6"
 
 [[deps.QuadGK]]
 deps = ["DataStructures", "LinearAlgebra"]
@@ -749,6 +883,7 @@ version = "1.3.3"
 
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+version = "0.7.0"
 
 [[deps.Serialization]]
 uuid = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
@@ -829,6 +964,7 @@ uuid = "4607b0f0-06f3-5cda-b6b1-a6196a1729e9"
 [[deps.TOML]]
 deps = ["Dates"]
 uuid = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+version = "1.0.0"
 
 [[deps.TableTraits]]
 deps = ["IteratorInterfaceExtensions"]
@@ -845,6 +981,7 @@ version = "1.10.0"
 [[deps.Tar]]
 deps = ["ArgTools", "SHA"]
 uuid = "a4e569a6-e804-4fa4-b0f3-eef7a1d5b13e"
+version = "1.10.1"
 
 [[deps.Test]]
 deps = ["InteractiveUtils", "Logging", "Random", "Serialization"]
@@ -878,6 +1015,7 @@ version = "0.9.4"
 [[deps.Zlib_jll]]
 deps = ["Libdl"]
 uuid = "83775a58-1f1d-513f-b197-d71354ab007a"
+version = "1.2.12+3"
 
 [[deps.Zygote]]
 deps = ["AbstractFFTs", "ChainRules", "ChainRulesCore", "DiffRules", "Distributed", "FillArrays", "ForwardDiff", "GPUArrays", "GPUArraysCore", "IRTools", "InteractiveUtils", "LinearAlgebra", "LogExpFunctions", "MacroTools", "NaNMath", "Random", "Requires", "SparseArrays", "SpecialFunctions", "Statistics", "ZygoteRules"]
@@ -894,14 +1032,17 @@ version = "0.2.2"
 [[deps.libblastrampoline_jll]]
 deps = ["Artifacts", "Libdl", "OpenBLAS_jll"]
 uuid = "8e850b90-86db-534c-a0d3-1478176c7d93"
+version = "5.1.1+0"
 
 [[deps.nghttp2_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "8e850ede-7688-5339-a07c-302acd2aaf8d"
+version = "1.48.0+0"
 
 [[deps.p7zip_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
+version = "17.4.0+0"
 """
 
 # ╔═╡ Cell order:
@@ -913,16 +1054,23 @@ uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
 # ╠═519dcc88-22d6-4ccd-b69e-6c8f75b9617f
 # ╠═79e14873-f06f-45c8-8eaf-425aebbcfcc6
 # ╠═8d7144cc-d006-4ffa-9f1e-6a91c7acd925
-# ╠═d17d89a4-d987-40be-9359-f29ee5e3b9df
 # ╟─191c1a65-d627-4595-88df-d5b5c73edcdf
 # ╠═654f8ec6-ee3a-4570-b122-03cab1955c47
+# ╟─c462804d-5ea6-4fb7-baf9-861c9c961fe7
+# ╠═2350385e-81e0-47ce-b13d-0cbbbfed4894
 # ╟─f39ff907-bc7c-49bd-b813-65ad03f4b190
 # ╟─1eee9776-8495-45dc-86dc-b05c16bea058
 # ╟─77986ac9-66ed-46b1-9a2f-e9a7dfa812d2
 # ╟─ec83c06c-7480-4b27-8f42-b0794330657a
-# ╠═0388e7b0-95d7-46b9-9a37-00180052d6dc
+# ╟─0388e7b0-95d7-46b9-9a37-00180052d6dc
+# ╟─bc29f7cd-5f96-491f-ac03-dd0f01f574ae
 # ╟─1e902be5-c98d-421a-8ef4-7294e6855640
 # ╟─8a7ce52a-403f-45e7-b9b8-b4b5b46c69ac
-# ╠═fbdbf4fd-bd9e-4844-890a-a7731279089d
+# ╟─fbdbf4fd-bd9e-4844-890a-a7731279089d
+# ╠═ca4090d5-ca8d-4045-8c56-49636198cf00
+# ╟─65e95d65-c0ec-4568-a52e-3b9242f68494
+# ╟─53f8e4b5-d39b-44a6-b8d7-017a94883293
+# ╠═f6d3e02b-0628-46f4-ac18-2027be4c3e50
+# ╟─26fece0f-2e3c-4966-81fa-ce794b2079c6
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
