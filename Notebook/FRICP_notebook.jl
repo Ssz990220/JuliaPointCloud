@@ -209,9 +209,6 @@ end
 # ╔═╡ ca4090d5-ca8d-4045-8c56-49636198cf00
 @test norm(P2P_ICP(source,target,ones(Float32,1000))-rt2T(R,t))<1e-5
 
-# ╔═╡ f6d3e02b-0628-46f4-ac18-2027be4c3e50
-norm.(source.-target)
-
 # ╔═╡ 26fece0f-2e3c-4966-81fa-ce794b2079c6
 begin
 	function tukey_energy(r::Vector{T},p) where {T}
@@ -252,6 +249,49 @@ function get_energy(W,ν₁,f)
 		return uniform_energy(W)
 	else
 		return uniform_energy(W)
+	end
+end
+
+# ╔═╡ 94f0e645-293a-40c2-925c-6f271207447e
+begin
+	function tukey_weight(r::Vector{T},p) where {T}
+		r = (1 .-(r./p).^2).^2;
+		r[r.>p] = T(0.0);
+		return r
+	end
+	function trimmed_weight(r::Vector{T},p) where {T}
+		return zeros(T,size(r,1))
+		## TODO: finish trimmed_energy function
+	end
+	fair_weight(r,p) = @inline sum(r.^2) ./ (1 .+r./p);
+	logistic_weight(r,p) = @inline sum(r.^2 .*(p./r)*tanh.(r./p));
+	welsch_weight(r,p) = @inline sum(1.0.-exp.(-r.^2 ./(2 .*p.*p)));
+	autowelsch_weight(r::Vector{T},p) where {T} = welsch_energy(r,T(0.5));
+	uniform_weight(r::Vector{T}) where {T} = @inline ones(T,size(r,1))
+end;
+
+# ╔═╡ 22dd669d-f9ec-4b54-b161-7a4ffa8ef708
+"""
+	get_weight(W,ν₁,f)
+get point cloud error weight given error `W`, parameter `ν₁`, with function specified by `f`
+"""
+function get_weight(W,ν₁,f)
+	if f == "tukey"
+		return tukey_weight(W,ν₁)
+	elseif f == "fair"
+		return fair_weight(W,ν₁)
+	elseif f == "log"
+		return logistic_weight(W,ν₁)
+	elseif f == "trimmed"
+		return trimmed_weight(W,ν₁)
+	elseif f == "welsch"
+		return welsch_weight(W,ν₁)
+	elseif f == "auto_welsch"
+		return autowelsch_weight(W,ν₁)
+	elseif f == "uniform"
+		return uniform_weight(W)
+	else
+		return uniform_weight(W)
 	end
 end
 
@@ -1069,8 +1109,9 @@ version = "17.4.0+0"
 # ╟─fbdbf4fd-bd9e-4844-890a-a7731279089d
 # ╠═ca4090d5-ca8d-4045-8c56-49636198cf00
 # ╟─65e95d65-c0ec-4568-a52e-3b9242f68494
-# ╟─53f8e4b5-d39b-44a6-b8d7-017a94883293
-# ╠═f6d3e02b-0628-46f4-ac18-2027be4c3e50
-# ╟─26fece0f-2e3c-4966-81fa-ce794b2079c6
+# ╠═53f8e4b5-d39b-44a6-b8d7-017a94883293
+# ╠═22dd669d-f9ec-4b54-b161-7a4ffa8ef708
+# ╠═94f0e645-293a-40c2-925c-6f271207447e
+# ╠═26fece0f-2e3c-4966-81fa-ce794b2079c6
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
