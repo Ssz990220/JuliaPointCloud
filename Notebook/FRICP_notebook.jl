@@ -34,15 +34,57 @@ md"## Parameters"
 
 # ╔═╡ 654f8ec6-ee3a-4570-b122-03cab1955c47
 begin
-ν₁ = 1.0; ν₂ = 1.0; 			# Dynamic Welsch Paras
+	ν₁ = 1.0; ν₂ = 1.0; 			# Dynamic Welsch Paras
+	max_iter = 1000;
+	m = 5; 							# Number of steps that AA looks back
+	d = 6; 							# Dimension of 
+	
+	
 end;
 
 # ╔═╡ c462804d-5ea6-4fb7-baf9-861c9c961fe7
 md"## FRICP"
 
 # ╔═╡ 2350385e-81e0-47ce-b13d-0cbbbfed4894
-function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,D}},param) where {T<:Number,D}
+function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,D}},AA,param) where {T<:Number,D}
 	
+end
+
+# ╔═╡ 11aebf61-cf36-450f-aa36-af3508844553
+md"## Structs"
+
+# ╔═╡ 79f62489-9919-4d4f-8b12-1854429c0ecd
+"""
+	AndersonAccleration{T}(m,d)
+
+Data structure that host Anderson Acceleration (AA) Algorithm.
+
+`T` is the data type of Point cloud
+
+`m` is # of step to look back
+
+`d` is the dimension of the problem (2D=4/3D=6)
+"""
+struct AndersonAcceleration{T<:AbstractFloat}
+	m::Int64  		# number of steps to look forward
+	dim::Int64 		# dimension of the problem
+	M::MMatrix
+	theta::MVector
+	scale::MVector
+	F::MVector
+	U::MVector
+	Gs::MVector
+	Fs::MVector
+	function AndersonAcceleration{T}(mₛ::Int64,d::Int64) where T<:AbstractFloat
+		M = @MMatrix zeros(T,mₛ,mₛ)
+		theta = -@MVector ones(T,mₛ)
+		scale = -@MVector ones(T,mₛ)
+		F = @MVector zeros(T,d)
+		U = @MVector zeros(T,d)
+		Gs = MVector{mₛ,MVector{d,T}}(undef)
+		Fs = MVector{mₛ,MVector{d,T}}(undef)
+		new(mₛ,d,M,theta,scale,F,U,Gs,Fs)
+	end
 end
 
 # ╔═╡ f39ff907-bc7c-49bd-b813-65ad03f4b190
@@ -98,6 +140,9 @@ begin
 	# source = source .- [mean]
 	Tree = KDTree(SVector2PC(source))
 end;
+
+# ╔═╡ 76056b2f-5335-40fa-8bd3-4d18fbd71b22
+AA = AndersonAcceleration{eltype(source[1])}(m,d)
 
 # ╔═╡ 0388e7b0-95d7-46b9-9a37-00180052d6dc
 """
@@ -323,7 +368,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.2"
 manifest_format = "2.0"
-project_hash = "e1208f72356885eb5aaae0d734b33134c66d9599"
+project_hash = "9c73c0cfda89c2038a690329a4e0d2815ee47146"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -1097,7 +1142,10 @@ version = "17.4.0+0"
 # ╟─191c1a65-d627-4595-88df-d5b5c73edcdf
 # ╠═654f8ec6-ee3a-4570-b122-03cab1955c47
 # ╟─c462804d-5ea6-4fb7-baf9-861c9c961fe7
+# ╠═76056b2f-5335-40fa-8bd3-4d18fbd71b22
 # ╠═2350385e-81e0-47ce-b13d-0cbbbfed4894
+# ╟─11aebf61-cf36-450f-aa36-af3508844553
+# ╟─79f62489-9919-4d4f-8b12-1854429c0ecd
 # ╟─f39ff907-bc7c-49bd-b813-65ad03f4b190
 # ╟─1eee9776-8495-45dc-86dc-b05c16bea058
 # ╟─77986ac9-66ed-46b1-9a2f-e9a7dfa812d2
