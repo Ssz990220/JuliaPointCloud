@@ -6,13 +6,12 @@ using InteractiveUtils
 
 # ╔═╡ e4532490-63e8-11ed-2f97-632853f48f1d
 begin
-	using Random, LinearAlgebra, BenchmarkTools
+	using Random, LinearAlgebra, BenchmarkTools, Test, Statistics, StaticArrays
 	using NearestNeighbors
 	using StaticArrays
 	using Flux3D
 	using Rotations
 	using ProfileCanvas
-	using Test
 end
 
 # ╔═╡ 5436358a-86ed-4724-a4b1-58ed3cb18d32
@@ -50,6 +49,12 @@ function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,
 	
 end
 
+# ╔═╡ ee7179f2-6f67-4036-9929-1fda8a239fe6
+md"### Test Field"
+
+# ╔═╡ 1a1ac5f9-f0b5-499d-9423-58b4aed0529c
+T = MMatrix{4,4,Float32,16}(I)
+
 # ╔═╡ 11aebf61-cf36-450f-aa36-af3508844553
 md"## Structs"
 
@@ -85,6 +90,15 @@ struct AndersonAcceleration{T<:AbstractFloat}
 		Fs = MVector{mₛ,MVector{d,T}}(undef)
 		new(mₛ,d,M,theta,scale,F,U,Gs,Fs)
 	end
+end
+
+# ╔═╡ 9762dec4-a593-4816-ae89-3e7716118a23
+"""
+	AA_replace!(AA,U)
+Replace current optimization variable with a given `U`
+"""
+@inline function AA_replace!(AA::AndersonAcceleration,U)
+	AA.U = U;
 end
 
 # ╔═╡ f39ff907-bc7c-49bd-b813-65ad03f4b190
@@ -142,7 +156,7 @@ begin
 end;
 
 # ╔═╡ 76056b2f-5335-40fa-8bd3-4d18fbd71b22
-AA = AndersonAcceleration{eltype(source[1])}(m,d)
+AA = AndersonAcceleration{eltype(source[1])}(m,d);
 
 # ╔═╡ 0388e7b0-95d7-46b9-9a37-00180052d6dc
 """
@@ -256,21 +270,22 @@ end
 
 # ╔═╡ 26fece0f-2e3c-4966-81fa-ce794b2079c6
 begin
-	function tukey_energy(r::Vector{T},p) where {T}
+	function tukey_energy(r::Vector{T},p::T) where {T}
 		r = (1 .-(r./p).^2).^2;
 		r[r.>p] = T(0.0);
 		return r
 	end
-	function trimmed_energy(r::Vector{T},p) where {T}
+	function trimmed_energy(r::Vector{T},p::T) where {T}
 		return zeros(T,size(r,1))
 		## TODO: finish trimmed_energy function
 	end
 	fair_energy(r,p) = @inline sum(r.^2) ./ (1 .+r./p);
 	logistic_energy(r,p) = @inline sum(r.^2 .*(p./r)*tanh.(r./p));
 	welsch_energy(r,p) = @inline sum(1.0.-exp.(-r.^2 ./(2 .*p.*p)));
-	autowelsch_energy(r::Vector{T},p) where {T} = welsch_energy(r,T(0.5));
+	autowelsch_energy(r::Vector{T},p::T) where {T} = welsch_energy(r,T(0.5));
 	uniform_energy(r::Vector{T}) where {T} = @inline ones(T,size(r,1))
-end;
+	md"Energy functions here"
+end
 
 # ╔═╡ 53f8e4b5-d39b-44a6-b8d7-017a94883293
 """
@@ -297,23 +312,34 @@ function get_energy(W,ν₁,f)
 	end
 end
 
-# ╔═╡ 94f0e645-293a-40c2-925c-6f271207447e
+# ╔═╡ 433792e0-0877-4ac8-971a-978e4fcf60bd
+"""
+	median(v)
+Find the median value of a vector `v`. `v` should be sorted ahead.
+"""
+function median(v::Vector{T}) where {T}
+	n = size(v,1)
+	if iseven(n)
+		return (v[n÷2] + v[n÷2+1])/T(2.0) 
+	else
+		return (v[(n+1)÷2] + v[(n-1)÷2])/T(2.0)
+	end
+end
+
+# ╔═╡ b7bb98d7-9469-4611-ab27-ddca18b9cfb5
 begin
-	function tukey_weight(r::Vector{T},p) where {T}
-		r = (1 .-(r./p).^2).^2;
-		r[r.>p] = T(0.0);
-		return r
-	end
-	function trimmed_weight(r::Vector{T},p) where {T}
-		return zeros(T,size(r,1))
-		## TODO: finish trimmed_energy function
-	end
-	fair_weight(r,p) = @inline sum(r.^2) ./ (1 .+r./p);
-	logistic_weight(r,p) = @inline sum(r.^2 .*(p./r)*tanh.(r./p));
-	welsch_weight(r,p) = @inline sum(1.0.-exp.(-r.^2 ./(2 .*p.*p)));
-	autowelsch_weight(r::Vector{T},p) where {T} = welsch_energy(r,T(0.5));
 	uniform_weight(r::Vector{T}) where {T} = @inline ones(T,size(r,1))
-end;
+	pnorm_weight(r::Vector{T},p::T,reg=T(1e-16)) where {T} = @inline p./(r.^(2-p) .+ reg)
+	tukey_weight(r::Vector{T},p::T) where {T} = @inline (T(1.0) .- (r ./ p).^(T(2.0))).^T(2.0)
+	fair_weight(r::Vector{T},p::T) where {T} = @inline T(1.0) ./ (T(1.0) .+ r ./ p)
+	logistic_weight(r::Vector{T},p::T) where {T} = @inline (p ./ r) .* tanh.(r./p)
+	welsch_weight(r::Vector{T},p::T) where {T} = @inline exp.(-(r.*r)./(2*p*p))
+	autowelsch_weight(r::Vector{T},p::T) where {T} = welsch_weight(r,p*median(r)/T(sqrt(2.0)*2.3))
+	function trimmed_weight(r::Vector{T},p::T) where {T}
+		return error
+	end
+	md"weight functions here"
+end
 
 # ╔═╡ 22dd669d-f9ec-4b54-b161-7a4ffa8ef708
 """
@@ -340,6 +366,18 @@ function get_weight(W,ν₁,f)
 	end
 end
 
+# ╔═╡ 33020dfe-eaef-47b6-800f-8329109de36b
+function FindKnearestMed(P::Vector{SMatrix{3,1,T,3}},Tree,k) where {T}
+	n = size(P,1)
+	Xnearest = Vector{T}(undef,n)
+	Threads.@threads for i = 1:n
+		idxs, dists = knn(Tree, P[i], k, true)
+		println(dists)
+		Xnearest[i] = median(dists[1])
+	end
+	return sqrt(median(Xnearest))
+end
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
@@ -351,6 +389,7 @@ ProfileCanvas = "efd6af41-a80b-495e-886c-e51b0c7d77a3"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
@@ -368,7 +407,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.2"
 manifest_format = "2.0"
-project_hash = "9c73c0cfda89c2038a690329a4e0d2815ee47146"
+project_hash = "a7b54cbeef497c4d9f646259f4ec4e4d06ca01da"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -1144,22 +1183,27 @@ version = "17.4.0+0"
 # ╟─c462804d-5ea6-4fb7-baf9-861c9c961fe7
 # ╠═76056b2f-5335-40fa-8bd3-4d18fbd71b22
 # ╠═2350385e-81e0-47ce-b13d-0cbbbfed4894
+# ╠═ee7179f2-6f67-4036-9929-1fda8a239fe6
+# ╠═1a1ac5f9-f0b5-499d-9423-58b4aed0529c
 # ╟─11aebf61-cf36-450f-aa36-af3508844553
 # ╟─79f62489-9919-4d4f-8b12-1854429c0ecd
+# ╟─9762dec4-a593-4816-ae89-3e7716118a23
 # ╟─f39ff907-bc7c-49bd-b813-65ad03f4b190
 # ╟─1eee9776-8495-45dc-86dc-b05c16bea058
 # ╟─77986ac9-66ed-46b1-9a2f-e9a7dfa812d2
 # ╟─ec83c06c-7480-4b27-8f42-b0794330657a
 # ╟─0388e7b0-95d7-46b9-9a37-00180052d6dc
-# ╟─bc29f7cd-5f96-491f-ac03-dd0f01f574ae
+# ╠═bc29f7cd-5f96-491f-ac03-dd0f01f574ae
 # ╟─1e902be5-c98d-421a-8ef4-7294e6855640
 # ╟─8a7ce52a-403f-45e7-b9b8-b4b5b46c69ac
 # ╟─fbdbf4fd-bd9e-4844-890a-a7731279089d
 # ╠═ca4090d5-ca8d-4045-8c56-49636198cf00
 # ╟─65e95d65-c0ec-4568-a52e-3b9242f68494
-# ╠═53f8e4b5-d39b-44a6-b8d7-017a94883293
-# ╠═22dd669d-f9ec-4b54-b161-7a4ffa8ef708
-# ╠═94f0e645-293a-40c2-925c-6f271207447e
-# ╠═26fece0f-2e3c-4966-81fa-ce794b2079c6
+# ╟─53f8e4b5-d39b-44a6-b8d7-017a94883293
+# ╟─22dd669d-f9ec-4b54-b161-7a4ffa8ef708
+# ╟─b7bb98d7-9469-4611-ab27-ddca18b9cfb5
+# ╟─26fece0f-2e3c-4966-81fa-ce794b2079c6
+# ╠═33020dfe-eaef-47b6-800f-8329109de36b
+# ╟─433792e0-0877-4ac8-971a-978e4fcf60bd
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
