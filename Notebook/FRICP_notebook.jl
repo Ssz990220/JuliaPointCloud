@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.19.15
+# v0.19.16
 
 using Markdown
 using InteractiveUtils
@@ -12,6 +12,7 @@ begin
 	using Flux3D
 	using Rotations
 	using ProfileCanvas
+	using MeshIO,FileIO,GeometryBasics
 end
 
 # ╔═╡ 5436358a-86ed-4724-a4b1-58ed3cb18d32
@@ -23,97 +24,70 @@ md"# Fast and Robust ICP
 md"## Load a Point Cloud"
 
 # ╔═╡ ba227a2d-91f9-49c5-ad9b-b2192d205eb9
-R = rand(RotMatrix{3,Float32})
-
-# ╔═╡ 519dcc88-22d6-4ccd-b69e-6c8f75b9617f
-t = @SMatrix rand(Float32,3,1)
+# ╠═╡ disabled = true
+#=╠═╡
+begin
+	R = rand(RotMatrix{3,Float32})
+	t = @SMatrix rand(Float32,3,1)
+	target = transform_PC(source,R,t)
+end
+  ╠═╡ =#
 
 # ╔═╡ 191c1a65-d627-4595-88df-d5b5c73edcdf
 md"## Parameters"
 
-# ╔═╡ 654f8ec6-ee3a-4570-b122-03cab1955c47
-begin
-	ν₁ = 1.0; ν₂ = 1.0; 			# Dynamic Welsch Paras
-	max_iter = 1000;
-	m = 5; 							# Number of steps that AA looks back
-	d = 6; 							# Dimension of 
-	
-	
-end;
-
 # ╔═╡ c462804d-5ea6-4fb7-baf9-861c9c961fe7
 md"## FRICP"
-
-# ╔═╡ 2350385e-81e0-47ce-b13d-0cbbbfed4894
-function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,D}},AA,param) where {T<:Number,D}
-	
-end
-
-# ╔═╡ ee7179f2-6f67-4036-9929-1fda8a239fe6
-md"### Test Field"
-
-# ╔═╡ 1a1ac5f9-f0b5-499d-9423-58b4aed0529c
-T = MMatrix{4,4,Float32,16}(I)
 
 # ╔═╡ 11aebf61-cf36-450f-aa36-af3508844553
 md"## Structs"
 
-# ╔═╡ 79f62489-9919-4d4f-8b12-1854429c0ecd
-"""
-	AndersonAccleration{T}(m,d)
-
-Data structure that host Anderson Acceleration (AA) Algorithm.
-
-`T` is the data type of Point cloud
-
-`m` is # of step to look back
-
-`d` is the dimension of the problem (2D=4/3D=6)
-"""
-struct AndersonAcceleration{T<:AbstractFloat}
-	m::Int64  		# number of steps to look forward
-	dim::Int64 		# dimension of the problem
-	M::MMatrix
-	theta::MVector
-	scale::MVector
-	F::MVector
-	U::MVector
-	Gs::MVector
-	Fs::MVector
-	function AndersonAcceleration{T}(mₛ::Int64,d::Int64) where T<:AbstractFloat
-		M = @MMatrix zeros(T,mₛ,mₛ)
-		theta = -@MVector ones(T,mₛ)
-		scale = -@MVector ones(T,mₛ)
-		F = @MVector zeros(T,d)
-		U = @MVector zeros(T,d)
-		Gs = MVector{mₛ,MVector{d,T}}(undef)
-		Fs = MVector{mₛ,MVector{d,T}}(undef)
-		new(mₛ,d,M,theta,scale,F,U,Gs,Fs)
-	end
-end
-
-# ╔═╡ 9762dec4-a593-4816-ae89-3e7716118a23
-"""
-	AA_replace!(AA,U)
-Replace current optimization variable with a given `U`
-"""
-@inline function AA_replace!(AA::AndersonAcceleration,U)
-	AA.U = U;
-end
-
 # ╔═╡ f39ff907-bc7c-49bd-b813-65ad03f4b190
 md"## Functions"
 
-# ╔═╡ 1eee9776-8495-45dc-86dc-b05c16bea058
-"""
-    load_PC(Path)
-Load a point cloud from given Path. Returns a point cloud `P` and # of Points `n`
-"""
-function load_PC(Path)
-    P = load_trimesh(Path)
-    P = PointCloud(P)
-    n = size(P.points,2)
-    return P, n
+# ╔═╡ bf054703-1880-4b01-8cd8-35fcf7c37973
+@inline SRange(n) = StaticArrays.SUnitRange(n,n)
+
+# ╔═╡ 521daff7-e4dc-43b3-aa7c-3e543c5b6ffe
+function AA_Acc!(G::SMatrix{D,1,T,D},Fs,Gs,U,scales,iter,par) where {T,D}
+	F = G .- U
+	if iter == 1
+		Fs[:,1] = -F
+		Gs[:,1] = -G
+		return G
+	else
+		m = par.aa.m
+		col = mod(iter-1,m) == 0 ? m : mod(iter-1,m)
+		theta = @MMatrix zeros(T,1,m)
+		
+		Fs[:,SRange(col)] .+= F
+		Gs[:,SRange(col)] .+= G
+		scale = maximum([T(1e-14),norm(Fs[:,SRange(col)])])
+		scales[:,SRange(col)] = scale
+		Fs[:,SRange(col)] .= Fs[:,SRange(col)] ./ scale
+	
+		# Incremental Update and solve
+		mₖ = minimum([par.aa.m,iter-1])
+		if mₖ == 1
+			Fn = norm(Fs[:,SRange(col)])^2; Fnᵣ = sqrt(Fn);
+			if (Fnᵣ > 1e-14)		## Prevent Zero Division
+				theta[1] = (transpose(Fs[:,SRange(col)]./Fnᵣ)*(F./Fnᵣ))[1]
+				## Triangle Projection
+			end
+		else
+			## Solve Linear Least Square for AA
+			theta[SOneTo(mₖ)] = Fs[:,SOneTo(mₖ)]\F
+		end
+	
+		## Assemble the acc result
+		U .= G .- Gs[:,SOneTo(mₖ)]*(theta[:,SOneTo(mₖ)]./scales[:,SOneTo(mₖ)])'
+		## Prepare for next iter
+		col += 1
+		col = mod(col,m) == 0 ? m : mod(col,m)
+		Fs[:,SRange(col)] .= -F
+		Gs[:,SRange(col)] .= -G
+	end
+	return U	
 end
 
 # ╔═╡ 77986ac9-66ed-46b1-9a2f-e9a7dfa812d2
@@ -130,47 +104,91 @@ function PC2SVector(PC::Matrix{T}) where {T<:Number}
     return PCVec
 end
 
+# ╔═╡ 5674df53-78ab-404e-859b-7b8abdaad2b3
+function Point2PC(P::Vector{GeometryBasics.Point{D,T}}) where {D,T}
+	n = size(P,1)
+	PC = zeros(T,D,n)
+	for i = 1:n
+		PC[:,i] = P[i]
+	end
+	return PC
+end
+
+# ╔═╡ 1eee9776-8495-45dc-86dc-b05c16bea058
+"""
+    load_PC(Path)
+Load a point cloud from given Path. Returns a point cloud `P` and # of Points `n`
+"""
+function load_PC(Path)
+    P = load(Path)
+	PC = P.position
+	P = Point2PC(PC)
+    P = PointCloud(P)
+    n = size(P.points,2)
+    return P, n
+end
+
+# ╔═╡ b0ef0120-4385-457f-8104-217de22ba4fa
+begin
+	PC, N = load_PC("../Assets/source.ply")
+	# Flux3D.normalize!(PC)
+	source = PC2SVector(PC.points[:,:,1]);
+	PCₜ, Nₜ = load_PC("../Assets/target.ply")
+	target = PC2SVector(PCₜ.points[:,:,1])
+end;
+
+# ╔═╡ 654f8ec6-ee3a-4570-b122-03cab1955c47
+begin 
+	function params(T)
+		max_iter = 100;
+		f = "welsch"
+		aa = (νₛ = T(3.0), νₑ = T(1.0/(3.0*sqrt(3.0))), m = 5, d = 6, νₜₕ=T(1e-6),α=T(0.5))
+		return (max_iter = max_iter, f = f, aa = aa, stop = T(1e-5))
+	end;
+	par = params(eltype(source[1]))
+end
 
 # ╔═╡ ec83c06c-7480-4b27-8f42-b0794330657a
 """
 	Svector2PC(PC)
 Convert vector of Points in SMatrix to a Matrix
 """
-function SVector2PC(P::Vector{SMatrix{3,1,T,3}}) where {T<:Number}
+function SVector2PC(P::Vector{SMatrix{D,1,T,D}}) where {T<:Number,D}
 	n = size(P,1);
-	PC = zeros(3,n)
+	PC = zeros(T,D,n)
 	Threads.@threads for i = 1:n
 		@inbounds PC[:,i] = P[i][:]'
 	end
 	return PC
 end
 
-# ╔═╡ b0ef0120-4385-457f-8104-217de22ba4fa
-begin
-	PC, N = load_PC("../Assets/dolphin.obj")
-	Flux3D.normalize!(PC)
-	source = PC2SVector(PC.points[:,:,1]);
-	# mean = sum(source)/N
-	# source = source .- [mean]
-	Tree = KDTree(SVector2PC(source))
-end;
-
-# ╔═╡ 76056b2f-5335-40fa-8bd3-4d18fbd71b22
-AA = AndersonAcceleration{eltype(source[1])}(m,d);
-
 # ╔═╡ 0388e7b0-95d7-46b9-9a37-00180052d6dc
 """
-	get_pc_closest_point(PC,Tree)
-Find the index & point coordiante of the closest point for each point in `P::Vector{SMatrix}` from KDTree `Tree::KDTree`. The indices are filled in `W`. Points are assigned in `Q`
+	get_pc_closest_point(X,Y,Tree)
+Find the index & point coordiante of the closest point for each point in `X::Vector{SMatrix}` from KDTree `Tree::KDTree`, which is built from point cloud `Y`. The indices are filled in `W`. Points are assigned in `Q`
 """
-function get_pc_closest_point(P::Vector{SMatrix{3,1,T,3}},Tree) where{T}
-	n = size(P,1)
-	Q = Array{SMatrix{3,1,T,3}}(undef,n)
-	W = zeros(n)
+function get_pc_closest_point(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},Tree) where{T,D}
+	n = size(X,1)
+	Q = Array{SMatrix{D,1,T,D}}(undef,n)
+	W = zeros(T,n)
 	Threads.@threads for i = 1:n
-		@inbounds idx = nn(Tree,P[i])[1][1]
-		@inbounds W[i] = idx
-		@inbounds Q[i] = P[idx]
+		@inbounds idx,dist = nn(Tree,X[i])
+		@inbounds W[i] = dist[1]
+		@inbounds Q[i] = Y[idx[1]]
+	end
+	return Q,W
+end
+
+# ╔═╡ ab7d59c1-e7fa-45f9-bb84-0af2bf8b8fce
+"""
+	get_pc_closest_point!(X,Y,Tree,Q,W)
+Find the index & point coordiante of the closest point for each point in `X::Vector{SMatrix}` from KDTree `Tree::KDTree`, which is built from point cloud `Y`. The indices are filled in `W`. Points are assigned in `Q`
+"""
+function get_pc_closest_point!(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},Tree,Q::Vector{SMatrix{D,1,T,D}},W::Vector{T}) where{T,D}
+	@inbounds Threads.@threads for i ∈ eachindex(X)
+		idx,dist = nn(Tree,X[i])
+		W[i] = dist[1]
+		Q[i] = Y[idx[1]]
 	end
 	return Q,W
 end
@@ -182,35 +200,13 @@ Find the index of the closest point for each point in `P::Vector{SMatrix}` from 
 """
 function get_pc_closest_point_id(P::Vector{SMatrix{3,1,T,3}},Tree) where{T}
 	n = size(P,1)
-	W = zeros(n)
+	id = zeros(n)
 	Threads.@threads for i = 1:n
 		@inbounds idx = nn(Tree,P[i])[1][1]
-		@inbounds W[i] = idx
+		@inbounds id[i] = idx
 	end
-	return W
+	return id
 end
-
-# ╔═╡ 1e902be5-c98d-421a-8ef4-7294e6855640
-"""
-	transform_PC!(PC,R,t)
-Transforming a Point Cloud `PC` under rotation `R` and translation `t`
-
-See also [`transform_PC!`](@ref)
-"""
-function transform_PC(PC::Vector{SMatrix{3,1,T,3}}, R::T₂, t::T₃) where {T<:Number,T₂<:AbstractMatrix{T},T₃<:AbstractMatrix{T}}
-	n = size(PC,1)
-	PC_ = Array{SMatrix{3,1,T,3}}(undef,n)
-	for i = 1:n
-		@inbounds PC_[i] = R*PC[i] .+ t;
-	end
-	return PC_
-end
-
-# ╔═╡ 79e14873-f06f-45c8-8eaf-425aebbcfcc6
-target = transform_PC(source,R,t)
-
-# ╔═╡ 8d7144cc-d006-4ffa-9f1e-6a91c7acd925
-Q,W = get_pc_closest_point(target, Tree)
 
 # ╔═╡ 8a7ce52a-403f-45e7-b9b8-b4b5b46c69ac
 """
@@ -220,9 +216,7 @@ Inplace transformation of a Point Cloud `PC` under rotation `R` and translation 
 See also [`transform_PC`](@ref)
 """
 function transform_PC!(PC::Vector{SMatrix{3,1,T,3}}, R::T₂, t::T₃) where {T<:Number,T₂<:AbstractMatrix{T},T₃<:AbstractMatrix{T}}
-	n = size(PC,1)
-	PC_ = Array{SMatrix{3,1,T,3}}(undef,n)
-	for i = 1:n
+	Threads.@threads for i ∈ eachindex(PC)
 		@inbounds PC[i] = R*PC[i] .+ t;
 	end
 end
@@ -243,30 +237,77 @@ end
 	P2P_ICP(source,target, w)
 Point to Point ICP with SVD. **Points in source and points in target are listed correspoindingly, given weight `w`**
 """
-function P2P_ICP(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,D}},w::Vector{T}=ones(T,size(source,1))) where {T<:Number,D}
+function P2P_ICP(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},w::Vector{T}=ones(T,size(source,1))) where {T<:Number,D}
 	wₙ = w/sum(w);
-	X = deepcopy(source); Y = deepcopy(target)
 	meanₛ = sum(X.*wₙ);X = X.-[meanₛ];
 	meanₜ = sum(Y.*wₙ);Y = Y.-[meanₜ];
-	X = SVector2PC(X); Y = SVector2PC(Y);
-	Σ = X * diagm(wₙ) * Y'
+	Σ = reduce(hcat, X) * reduce(hcat, Y.*wₙ)'
 	F = svd(Σ);
 	U = SMatrix{D,D,T,D*D}(F.U);
 	V = SMatrix{D,D,T,D*D}(F.V);
 	if det(U)*det(V) < 0
-		s = ones(T,D); s[-1] = -s[-1];
+		s = ones(T,D); s[end] = -s[end];
 		S = SMatrix{D,D,T,D*D}(diagm(s))
 		R = V*S*U';
 	else
 		R = V*U';
 	end
 	t = meanₜ-R*meanₛ
-	X = PC2SVector(X).+ [meanₛ]; Y = PC2SVector(Y).+ [meanₜ];
+	X = X.+ [meanₛ]; Y = Y.+ [meanₜ];
 	return rt2T(R,t)
 end
 
-# ╔═╡ ca4090d5-ca8d-4045-8c56-49636198cf00
-@test norm(P2P_ICP(source,target,ones(Float32,1000))-rt2T(R,t))<1e-5
+# ╔═╡ d1886891-e260-4104-866a-ead8284af0ce
+"""
+	T2rt(T)
+Decompose a homogenous transformation matrix `T` into a rotation matrix `R` and a translational vector `t`
+"""
+function T2rt(T)
+	R = T[SOneTo(3),SOneTo(3)]
+	t = T[SOneTo(3),4]
+	return R,t
+end
+
+# ╔═╡ 1e902be5-c98d-421a-8ef4-7294e6855640
+begin
+"""
+transform_PC(PC,R,t)
+Transforming a Point Cloud `PC` under rotation `R` and translation `t`
+
+See also [`transform_PC!`](@ref)
+"""
+	function transform_PC(PC::Vector{SMatrix{3,1,T,3}}, R::T₂, t::T₃) where {T<:Number,T₂<:AbstractMatrix{T},T₃<:AbstractMatrix{T}}
+		n = size(PC,1)
+		PC_ = Array{SMatrix{3,1,T,3}}(undef,n)
+		Threads.@threads for i ∈ eachindex(PC)
+			@inbounds PC_[i] = R*PC[i] .+ t;
+		end
+		return PC_
+	end
+	function transform_PC(PC::Vector{SMatrix{3,1,T₁,3}}, T::T₂) where {T₁<:Number,T₂<:AbstractMatrix{T₁}}
+		n = size(PC,1)
+		R,t = T2rt(T)
+		PC_ = Array{SMatrix{3,1,T₁,3}}(undef,n)
+		Threads.@threads for i ∈ eachindex(PC)
+			@inbounds PC_[i] = R*PC[i] .+ t;
+		end
+		return PC_
+	end
+end
+
+# ╔═╡ 56844bba-6900-4c19-8925-03d5ae307599
+"""
+	transform_PC!(PC,T)
+Inplace transformation of a Point Cloud `PC` under transformation `T`
+
+See also [`transform_PC`](@ref)
+"""
+function transform_PC!(PC::Vector{SMatrix{3,1,T₁,3}}, T::T₂) where {T₁<:Number,T₂<:AbstractMatrix{T₁}}
+	R,t = T2rt(T)
+	Threads.@threads for i ∈ eachindex(PC)
+		@inbounds PC[i] = R*PC[i] .+ t;
+	end
+end
 
 # ╔═╡ 26fece0f-2e3c-4966-81fa-ce794b2079c6
 begin
@@ -281,7 +322,7 @@ begin
 	end
 	fair_energy(r,p) = @inline sum(r.^2) ./ (1 .+r./p);
 	logistic_energy(r,p) = @inline sum(r.^2 .*(p./r)*tanh.(r./p));
-	welsch_energy(r,p) = @inline sum(1.0.-exp.(-r.^2 ./(2 .*p.*p)));
+	welsch_energy(r::Vector{T},p::T) where {T} = @inline sum(T(1.0).-exp.(-r.^2 ./(T(2.0) .*p.*p)));
 	autowelsch_energy(r::Vector{T},p::T) where {T} = welsch_energy(r,T(0.5));
 	uniform_energy(r::Vector{T}) where {T} = @inline ones(T,size(r,1))
 	md"Energy functions here"
@@ -343,26 +384,26 @@ end
 
 # ╔═╡ 22dd669d-f9ec-4b54-b161-7a4ffa8ef708
 """
-	get_weight(W,ν₁,f)
-get point cloud error weight given error `W`, parameter `ν₁`, with function specified by `f`
+	robust_weight!(W,ν₁,f)
+get point cloud robust weight given error `W`, parameter `ν₁`, with function specified by `f`
 """
-function get_weight(W,ν₁,f)
+function robust_weight!(W,ν₁,f)
 	if f == "tukey"
-		return tukey_weight(W,ν₁)
+		W.= tukey_weight(W,ν₁)
 	elseif f == "fair"
-		return fair_weight(W,ν₁)
+		W.=  fair_weight(W,ν₁)
 	elseif f == "log"
-		return logistic_weight(W,ν₁)
+		W.=  logistic_weight(W,ν₁)
 	elseif f == "trimmed"
-		return trimmed_weight(W,ν₁)
+		W.=  trimmed_weight(W,ν₁)
 	elseif f == "welsch"
-		return welsch_weight(W,ν₁)
+		W.=  welsch_weight(W,ν₁)
 	elseif f == "auto_welsch"
-		return autowelsch_weight(W,ν₁)
+		W.=  autowelsch_weight(W,ν₁)
 	elseif f == "uniform"
-		return uniform_weight(W)
+		W.=  uniform_weight(W)
 	else
-		return uniform_weight(W)
+		W.=  uniform_weight(W)
 	end
 end
 
@@ -372,18 +413,158 @@ function FindKnearestMed(P::Vector{SMatrix{3,1,T,3}},Tree,k) where {T}
 	Xnearest = Vector{T}(undef,n)
 	Threads.@threads for i = 1:n
 		idxs, dists = knn(Tree, P[i], k, true)
-		println(dists)
 		Xnearest[i] = median(dists[1])
 	end
 	return sqrt(median(Xnearest))
 end
 
+# ╔═╡ 16e90931-721e-4dbf-b921-b68f119a4476
+function MatrixLog3(R::AbstractMatrix{T}) where {T<:Number}
+	acosinput = (tr(R) - T(1.0)) / T(2.0);
+	if acosinput >= 1
+		so3mat = zeros(T,3,3);
+	elseif acosinput <= -1
+		if ~NearZero(T(1.0) + R[3, 3])
+			omg = (T(1.0) / sqrt(T(2.0) * (T(1.0) + R[3, 3])))* [R[1,3]; R[2,3]; T(1.0) + R[3,3]];
+		elseif ~NearZero(T(1.0) + R[2, 2])
+			omg = (T(1.0) / sqrt(T(2.0) * (T(1.0) + R[2, 2])))* [R[1, 2]; T(1.0) + R[2, 2]; R[3, 2]];
+		else
+			omg = (T(1.0) / sqrt(T(2.0) * (T(1.0) + R[1, 1])))* [T(1.0) + R[1, 1]; R[2, 1]; R[3, 1]];
+		end
+		so3mat = mcross(pi * omg);
+	else
+		theta = acos(acosinput);
+		so3mat = theta * (T(1.0) / (T(2.0) * sin(theta))) * (R - R');
+	end
+	return so3mat
+end
+
+# ╔═╡ 9eba2bdd-1ccf-4621-8df0-9ed3eec8707a
+function wrapto1(a::T) where {T<:Number}
+	if a > 1 
+		return T(1.0)
+	elseif a < -1
+		return T(-1.0)
+	else
+		return a
+	end
+end
+
+# ╔═╡ 7b50b05c-b3bf-468c-95da-7ddcf72479a0
+function MatrixLog6(T::AbstractMatrix{D}) where {D<:Number}
+	R, p = T2rt(T);
+	omgmat = MatrixLog3(R);
+	if isequal(omgmat, zeros(D,3,3))
+		R = @SMatrix zeros(D,3,3)
+		expmat = vcat(hcat(R,T[SOneTo(3), 4]) ,@SMatrix zeros(D,1,4));
+	else
+		theta = acos(wrapto1((tr(R) - 1.0f0) / 2.0f0));
+		expmat = vcat(hcat(omgmat,(I - omgmat ./ 2.0f0 + (1.0f0 / theta - cot(theta / 2.0f0) / 2.0f0) * omgmat * omgmat / theta) * p),@SMatrix zeros(D,1,4));
+	end
+	return expmat
+end
+
+# ╔═╡ 9f17db92-7724-4459-bc50-1a8fa27944ac
+se32vec(se3) = @SMatrix [-se3[2,3];se3[1,3];-se3[1,2];se3[1,4];se3[2,4];se3[3,4]]
+
+# ╔═╡ 832d9d3d-5379-49a9-8a82-6486a835573e
+vec2se3(vec::StaticArray{Tuple{D, 1}, T, 2}) where {T,D}  = @SMatrix [T(0.0) -vec[3] vec[2] vec[4]; 
+										vec[3] T(0.0) -vec[1] vec[5];
+										-vec[2] vec[1] T(0.0) vec[6]; 
+										T(0.0) T(0.0) T(0.0) T(0.0)]
+
+# ╔═╡ 2350385e-81e0-47ce-b13d-0cbbbfed4894
+function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,D}},param) where {T<:Number,D}
+	## Setup Buffer
+	n = size(source,1)
+	X = deepcopy(source)
+	Y = target; Tree = KDTree(SVector2PC(Y));
+	if haskey(par,:init)
+		Tₘ = par.init ? par.T : MMatrix{D+1,D+1,T,(D+1)^2}(I)
+	else
+		Tₘ = MMatrix{D+1,D+1,T,(D+1)^2}(I)
+	end
+	local energys = zeros(T,par.max_iter)
+	local last_energy = typemax(T)
+	local T_p2p = @SMatrix zeros(T,D+1,D+1)
+	local Tₗₐₛₜ = @MMatrix zeros(T,D+1,D+1)
+	local Q = Vector{SMatrix{D,1,T,D}}(undef,n)
+	local W = zeros(T,n)
+	
+	## Initial Closest Point and Weights
+	get_pc_closest_point!(X,Y,Tree,Q,W)
+	
+	## Welsch Parameters
+	ν₂ = par.aa.νₑ * FindKnearestMed(target,Tree,7)
+	ν₁ = par.aa.νₛ * median(W)
+	ν₁ = ν₁ > ν₂ ? ν₁ : ν₂
+
+	## AA Buffers
+	d = D == 3 ? 6 : 4 		# 3D & 2D only
+	theta = @MMatrix zeros(T,1,par.aa.m)
+	scales = @MMatrix zeros(T,1,par.aa.m)
+	local U = @MMatrix zeros(T,d,1)
+	local Tᵥ = @MMatrix zeros(T,d,1)
+	local Gs = @MMatrix zeros(T,d,par.aa.m,)
+	local Fs = @MMatrix zeros(T,d,par.aa.m,)
+	local iter = 0
+	local counter = 0
+
+	## Main Loop
+	while true
+		iter = 1
+		for i = 1:par.max_iter
+			acceptₐₐ = false
+			energy = get_energy(W,ν₁,"welsch")
+			if energy < last_energy
+				last_energy = energy
+				acceptₐₐ = true
+			else
+				U .= se32vec(MatrixLog6(T_p2p))
+				X_ = transform_PC(X,T_p2p)
+				get_pc_closest_point!(X_,Y,Tree,Q,W)
+				last_energy = get_energy(W,ν₁,"welsch")
+			end
+			energys[i] = last_energy
+			robust_weight!(W,ν₁,"welsch")
+			T_p2p = P2P_ICP(X,Q,W)
+			Tᵥ .= AA_Acc!(se32vec(MatrixLog6(T_p2p)),Fs,Gs,U,scales,iter,par)
+			Tₘ = exp(vec2se3(Tᵥ))
+			
+			X_ = transform_PC(X,Tₘ)
+			get_pc_closest_point!(X_,Y,Tree,Q,W)
+			iter += 1
+			counter += 1
+			## Global Stop Criteria
+			stop = norm(Tₘ-Tₗₐₛₜ)
+			Tₗₐₛₜ .= Tₘ
+			if stop<par.stop
+				break
+			end
+		end
+		if abs(ν₁-ν₂) < par.aa.νₜₕ
+			break
+		else
+			ν₁ = ν₁*par.aa.α > ν₂ ? ν₁*par.aa.α : ν₂
+			last_energy = typemax(T)
+		end
+	end
+	@show counter
+	return Tₘ
+end
+
+# ╔═╡ aba902a4-7dd2-42cc-84bc-62c6c5957e4b
+FICP_P2P(source,target,par)
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 Flux3D = "432009dd-59a1-4b72-8c93-6462ce9b220f"
+GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MeshIO = "7269a6da-0436-5bbc-96c2-40638cbb6118"
 NearestNeighbors = "b8a86587-4115-5ab1-83bc-aa920d37bbce"
 ProfileCanvas = "efd6af41-a80b-495e-886c-e51b0c7d77a3"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
@@ -394,7 +575,10 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
 BenchmarkTools = "~1.3.2"
+FileIO = "~1.16.0"
 Flux3D = "~0.1.6"
+GeometryBasics = "~0.4.5"
+MeshIO = "~0.4.10"
 NearestNeighbors = "~0.4.12"
 ProfileCanvas = "~0.1.6"
 Rotations = "~1.3.3"
@@ -407,7 +591,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.2"
 manifest_format = "2.0"
-project_hash = "a7b54cbeef497c4d9f646259f4ec4e4d06ca01da"
+project_hash = "b96ad0a318dc0bdbe26394dd2b1678c8afc833c9"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -685,9 +869,9 @@ version = "1.0.1"
 
 [[deps.GeometryBasics]]
 deps = ["EarCut_jll", "GeoInterface", "IterTools", "LinearAlgebra", "StaticArrays", "StructArrays", "Tables"]
-git-tree-sha1 = "12a584db96f1d460421d5fb8860822971cdb8455"
+git-tree-sha1 = "fe9aea4ed3ec6afdfbeb5a4f39a2208909b162a6"
 uuid = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
-version = "0.4.4"
+version = "0.4.5"
 
 [[deps.GeometryTypes]]
 deps = ["ColorTypes", "FixedPointNumbers", "LinearAlgebra", "StaticArrays"]
@@ -1175,35 +1359,38 @@ version = "17.4.0+0"
 # ╟─012ef84b-48cb-4932-9879-48acc2e1f39d
 # ╠═b0ef0120-4385-457f-8104-217de22ba4fa
 # ╠═ba227a2d-91f9-49c5-ad9b-b2192d205eb9
-# ╠═519dcc88-22d6-4ccd-b69e-6c8f75b9617f
-# ╠═79e14873-f06f-45c8-8eaf-425aebbcfcc6
-# ╠═8d7144cc-d006-4ffa-9f1e-6a91c7acd925
 # ╟─191c1a65-d627-4595-88df-d5b5c73edcdf
 # ╠═654f8ec6-ee3a-4570-b122-03cab1955c47
 # ╟─c462804d-5ea6-4fb7-baf9-861c9c961fe7
-# ╠═76056b2f-5335-40fa-8bd3-4d18fbd71b22
 # ╠═2350385e-81e0-47ce-b13d-0cbbbfed4894
-# ╠═ee7179f2-6f67-4036-9929-1fda8a239fe6
-# ╠═1a1ac5f9-f0b5-499d-9423-58b4aed0529c
+# ╠═aba902a4-7dd2-42cc-84bc-62c6c5957e4b
 # ╟─11aebf61-cf36-450f-aa36-af3508844553
-# ╟─79f62489-9919-4d4f-8b12-1854429c0ecd
-# ╟─9762dec4-a593-4816-ae89-3e7716118a23
+# ╠═521daff7-e4dc-43b3-aa7c-3e543c5b6ffe
 # ╟─f39ff907-bc7c-49bd-b813-65ad03f4b190
-# ╟─1eee9776-8495-45dc-86dc-b05c16bea058
-# ╟─77986ac9-66ed-46b1-9a2f-e9a7dfa812d2
-# ╟─ec83c06c-7480-4b27-8f42-b0794330657a
-# ╟─0388e7b0-95d7-46b9-9a37-00180052d6dc
+# ╠═bf054703-1880-4b01-8cd8-35fcf7c37973
+# ╠═1eee9776-8495-45dc-86dc-b05c16bea058
+# ╠═77986ac9-66ed-46b1-9a2f-e9a7dfa812d2
+# ╠═5674df53-78ab-404e-859b-7b8abdaad2b3
+# ╠═ec83c06c-7480-4b27-8f42-b0794330657a
+# ╠═0388e7b0-95d7-46b9-9a37-00180052d6dc
+# ╠═ab7d59c1-e7fa-45f9-bb84-0af2bf8b8fce
 # ╠═bc29f7cd-5f96-491f-ac03-dd0f01f574ae
 # ╟─1e902be5-c98d-421a-8ef4-7294e6855640
-# ╟─8a7ce52a-403f-45e7-b9b8-b4b5b46c69ac
-# ╟─fbdbf4fd-bd9e-4844-890a-a7731279089d
-# ╠═ca4090d5-ca8d-4045-8c56-49636198cf00
+# ╠═8a7ce52a-403f-45e7-b9b8-b4b5b46c69ac
+# ╟─56844bba-6900-4c19-8925-03d5ae307599
+# ╠═fbdbf4fd-bd9e-4844-890a-a7731279089d
 # ╟─65e95d65-c0ec-4568-a52e-3b9242f68494
+# ╟─d1886891-e260-4104-866a-ead8284af0ce
 # ╟─53f8e4b5-d39b-44a6-b8d7-017a94883293
 # ╟─22dd669d-f9ec-4b54-b161-7a4ffa8ef708
 # ╟─b7bb98d7-9469-4611-ab27-ddca18b9cfb5
 # ╟─26fece0f-2e3c-4966-81fa-ce794b2079c6
-# ╠═33020dfe-eaef-47b6-800f-8329109de36b
+# ╟─33020dfe-eaef-47b6-800f-8329109de36b
 # ╟─433792e0-0877-4ac8-971a-978e4fcf60bd
+# ╠═16e90931-721e-4dbf-b921-b68f119a4476
+# ╠═7b50b05c-b3bf-468c-95da-7ddcf72479a0
+# ╠═9eba2bdd-1ccf-4621-8df0-9ed3eec8707a
+# ╟─9f17db92-7724-4459-bc50-1a8fa27944ac
+# ╠═832d9d3d-5379-49a9-8a82-6486a835573e
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
