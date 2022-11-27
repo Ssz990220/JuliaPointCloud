@@ -57,20 +57,34 @@ function SVector2PC(P::Vector{SMatrix{D,1,T,D}}) where {T<:Number,D}
 end
 
 """
-	get_pc_closest_point(PC,Tree)
-Find the index & point coordiante of the closest point for each point in `P::Vector{SMatrix}` from KDTree `Tree::KDTree`. The indices are filled in `W`. Points are assigned in `Q`
+	get_pc_closest_point(X,Y,Tree)
+Find the index & point coordiante of the closest point for each point in `X::Vector{SMatrix}` from KDTree `Tree::KDTree`, which is built from point cloud `Y`. The indices are filled in `W`. Points are assigned in `Q`
 """
-function get_pc_closest_point(P::Vector{SMatrix{3,1,T,3}},Tree) where{T}
-	n = size(P,1)
-	Q = Array{SMatrix{3,1,T,3}}(undef,n)
+function get_pc_closest_point(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},Tree) where{T,D}
+	n = size(X,1)
+	Q = Array{SMatrix{D,1,T,D}}(undef,n)
 	W = zeros(T,n)
 	Threads.@threads for i = 1:n
-		@inbounds idx,dist = nn(Tree,P[i])
+		@inbounds idx,dist = nn(Tree,X[i])
 		@inbounds W[i] = dist[1]
-		@inbounds Q[i] = P[idx[1]]
+		@inbounds Q[i] = Y[idx[1]]
 	end
 	return Q,W
 end
+
+"""
+	get_pc_closest_point!(X,Y,Tree,Q,W)
+Find the index & point coordiante of the closest point for each point in `X::Vector{SMatrix}` from KDTree `Tree::KDTree`, which is built from point cloud `Y`. The indices are filled in `W`. Points are assigned in `Q`
+"""
+function get_pc_closest_point!(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},Tree,Q::Vector{SMatrix{D,1,T,D}},W::Vector{T}) where{T,D}
+	@inbounds Threads.@threads for i ∈ eachindex(X)
+		idx,dist = nn(Tree,X[i])
+		W[i] = dist[1]
+		Q[i] = Y[idx[1]]
+	end
+	return Q,W
+end
+
 
 """
 	get_pc_closest_point_id(PC,Tree,W)
@@ -88,7 +102,7 @@ end
 
 begin
 """
-transform_PC(PC,R,t)
+	transform_PC(PC,R,t)
 Transforming a Point Cloud `PC` under rotation `R` and translation `t`
 
 See also [`transform_PC!`](@ref)
@@ -141,25 +155,23 @@ end
 	P2P_ICP(source,target, w)
 Point to Point ICP with SVD. **Points in source and points in target are listed correspoindingly, given weight `w`**
 """
-function P2P_ICP(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,D}},w::Vector{T}=ones(T,size(source,1))) where {T<:Number,D}
+function P2P_ICP(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},w::Vector{T}=ones(T,size(source,1))) where {T<:Number,D}
 	wₙ = w/sum(w);
-	X = deepcopy(source); Y = deepcopy(target)
 	meanₛ = sum(X.*wₙ);X = X.-[meanₛ];
 	meanₜ = sum(Y.*wₙ);Y = Y.-[meanₜ];
-	X = SVector2PC(X); Y = SVector2PC(Y);
-	Σ = X * diagm(wₙ) * Y'
+	Σ = reduce(hcat, X) * reduce(hcat, Y.*wₙ)'
 	F = svd(Σ);
 	U = SMatrix{D,D,T,D*D}(F.U);
 	V = SMatrix{D,D,T,D*D}(F.V);
 	if det(U)*det(V) < 0
-		s = ones(T,D); s[-1] = -s[-1];
+		s = ones(T,D); s[end] = -s[end];
 		S = SMatrix{D,D,T,D*D}(diagm(s))
 		R = V*S*U';
 	else
 		R = V*U';
 	end
 	t = meanₜ-R*meanₛ
-	X = PC2SVector(X).+ [meanₛ]; Y = PC2SVector(Y).+ [meanₜ];
+	X = X.+ [meanₛ]; Y = Y.+ [meanₜ];
 	return rt2T(R,t)
 end
 

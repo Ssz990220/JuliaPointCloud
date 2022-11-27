@@ -22,10 +22,12 @@ function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,
 	local energys = zeros(T,par.max_iter)
 	local last_energy = typemax(T)
 	local T_p2p = @SMatrix zeros(T,D+1,D+1)
-	local Tₗₐₛₜ = deepcopy(Tₘ)
+	local Tₗₐₛₜ = @MMatrix zeros(T,D+1,D+1)
+	local Q = Vector{SMatrix{D,1,T,D}}(undef,n)
+	local W = zeros(T,n)
 	
 	## Initial Closest Point and Weights
-	local Q,W = get_pc_closest_point(X,Tree)
+	get_pc_closest_point!(X,Y,Tree,Q,W)
 	
 	## Welsch Parameters
 	ν₂ = par.aa.νₑ * FindKnearestMed(target,Tree,7)
@@ -42,7 +44,7 @@ function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,
 	local Fs = @MMatrix zeros(T,d,par.aa.m,)
 	local iter = 0
 	local counter = 0
-	
+
 	## Main Loop
 	while true
 		iter = 1
@@ -55,7 +57,7 @@ function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,
 			else
 				U .= se32vec(MatrixLog6(T_p2p))
 				X_ = transform_PC(X,T_p2p)
-				Q,W = get_pc_closest_point(X_,Tree)
+				get_pc_closest_point!(X_,Y,Tree,Q,W)
 				last_energy = get_energy(W,ν₁,"welsch")
 			end
 			energys[i] = last_energy
@@ -65,10 +67,13 @@ function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,
 			Tₘ = exp(vec2se3(Tᵥ))
 			
 			X_ = transform_PC(X,Tₘ)
-			Q,W = get_pc_closest_point(X_,Tree)
+			get_pc_closest_point!(X_,Y,Tree,Q,W)
 			iter += 1
+			counter += 1
 			## Global Stop Criteria
-			if norm(Tₘ-Tₗₐₛₜ)<par.stop
+			stop = norm(Tₘ-Tₗₐₛₜ)
+			Tₗₐₛₜ .= Tₘ
+			if stop<par.stop
 				break
 			end
 		end
