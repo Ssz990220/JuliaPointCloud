@@ -9,7 +9,7 @@ begin
 end
 include("utils.jl")
 
-function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,D}},param) where {T<:Number,D}
+function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,D}},par) where {T<:Number,D}
 	## Setup Buffer
 	n = size(source,1)
 	X = deepcopy(source)
