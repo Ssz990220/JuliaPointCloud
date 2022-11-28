@@ -4,130 +4,33 @@
 using Markdown
 using InteractiveUtils
 
-# ╔═╡ e4532490-63e8-11ed-2f97-632853f48f1d
+# ╔═╡ 98fab5ee-6f19-11ed-3bd1-4bc59df01a5c
 begin
-	using Random, LinearAlgebra, BenchmarkTools, Test, Statistics, StaticArrays
-	using NearestNeighbors
-	using StaticArrays
-	using Flux3D
-	using Rotations
-	using ProfileCanvas
-	using MeshIO,FileIO,GeometryBasics
+	using MAT,Printf
+    using Random, LinearAlgebra, BenchmarkTools, Test, Statistics, StaticArrays
+    using NearestNeighbors
+    using StaticArrays
+    using Flux3D
+    using Rotations
+    using ProfileCanvas
+    using MeshIO,FileIO,GeometryBasics
 end
 
-# ╔═╡ 5436358a-86ed-4724-a4b1-58ed3cb18d32
-md"# Fast and Robust ICP
-*Juyong Zhang and Yuxin Yao and Bailin Deng*, 
-*IEEE Transactions on Pattern Analysis and Machine Intelligence*"
-
-# ╔═╡ 012ef84b-48cb-4932-9879-48acc2e1f39d
-md"## Load a Point Cloud"
-
-# ╔═╡ 191c1a65-d627-4595-88df-d5b5c73edcdf
-md"## Parameters"
-
-# ╔═╡ c462804d-5ea6-4fb7-baf9-861c9c961fe7
-md"## FRICP"
-
-# ╔═╡ 11aebf61-cf36-450f-aa36-af3508844553
-md"## Structs"
-
-# ╔═╡ f39ff907-bc7c-49bd-b813-65ad03f4b190
-md"## Functions"
-
-# ╔═╡ bf054703-1880-4b01-8cd8-35fcf7c37973
-@inline SRange(n) = StaticArrays.SUnitRange(n,n)
-
-# ╔═╡ 521daff7-e4dc-43b3-aa7c-3e543c5b6ffe
-function AA_Acc!(G::SMatrix{D,1,T,D},Fs,Gs,U,scales,iter,par) where {T,D}
-	F = G .- U
-	if iter == 1
-		Fs[:,1] = -F
-		Gs[:,1] = -G
-		return G
-	else
-		m = par.aa.m
-		col = mod(iter-1,m) == 0 ? m : mod(iter-1,m)
-		theta = @MMatrix zeros(T,1,m)
-		
-		Fs[:,SRange(col)] .+= F
-		Gs[:,SRange(col)] .+= G
-		scale = maximum([T(1e-14),norm(Fs[:,SRange(col)])])
-		scales[:,SRange(col)] = scale
-		Fs[:,SRange(col)] .= Fs[:,SRange(col)] ./ scale
-	
-		# Incremental Update and solve
-		mₖ = minimum([par.aa.m,iter-1])
-		if mₖ == 1
-			Fn = norm(Fs[:,SRange(col)])^2; Fnᵣ = sqrt(Fn);
-			if (Fnᵣ > 1e-14)		## Prevent Zero Division
-				theta[1] = (transpose(Fs[:,SRange(col)]./Fnᵣ)*(F./Fnᵣ))[1]
-				## Triangle Projection
-			end
-		else
-			## Solve Linear Least Square for AA
-			theta[SOneTo(mₖ)] = Fs[:,SOneTo(mₖ)]\F
-		end
-	
-		## Assemble the acc result
-		U .= G .- Gs[:,SOneTo(mₖ)]*(theta[:,SOneTo(mₖ)]./scales[:,SOneTo(mₖ)])'
-		## Prepare for next iter
-		col += 1
-		col = mod(col,m) == 0 ? m : mod(col,m)
-		Fs[:,SRange(col)] .= -F
-		Gs[:,SRange(col)] .= -G
-	end
-	return U	
-end
-
-# ╔═╡ 77986ac9-66ed-46b1-9a2f-e9a7dfa812d2
-"""
-    PC2SVector(PC)
-Convert a point cloud to array of StaticMatrices
-"""
-function PC2SVector(PC::Matrix{T}) where {T<:Number}
-    n = size(PC,2);
-    PCVec = Array{SMatrix{3,1,T,3}}(undef,n)
-    Threads.@threads for i = 1:n
-        @inbounds PCVec[i] = @SMatrix [PC[1,i];PC[2,i];PC[3,i]]
-    end
-    return PCVec
-end
-
-# ╔═╡ 5674df53-78ab-404e-859b-7b8abdaad2b3
-function Point2PC(P::Vector{GeometryBasics.Point{D,T}}) where {D,T}
-	n = size(P,1)
-	PC = zeros(T,D,n)
-	for i = 1:n
-		PC[:,i] = P[i]
-	end
-	return PC
-end
-
-# ╔═╡ 1eee9776-8495-45dc-86dc-b05c16bea058
-"""
-    load_PC(Path)
-Load a point cloud from given Path. Returns a point cloud `P` and # of Points `n`
-"""
-function load_PC(Path)
-    P = load(Path)
-	PC = P.position
-	P = Point2PC(PC)
-    P = PointCloud(P)
-    n = size(P.points,2)
-    return P, n
-end
-
-# ╔═╡ b0ef0120-4385-457f-8104-217de22ba4fa
+# ╔═╡ ffecec34-68e5-49a9-9269-8781fdb0a33b
+# ╠═╡ show_logs = false
 begin
-	PC, N = load_PC("../Assets/source.ply")
-	# Flux3D.normalize!(PC)
-	source = PC2SVector(PC.points[:,:,1]);
-	PCₜ, Nₜ = load_PC("../Assets/target.ply")
-	target = PC2SVector(PCₜ.points[:,:,1])
+	include("../Scripts/FRICP.jl")
+	include("../Scripts/utils.jl")
 end;
 
-# ╔═╡ 654f8ec6-ee3a-4570-b122-03cab1955c47
+# ╔═╡ ed24feb1-b1c8-4657-93bc-a40abcbb7f76
+begin
+	pc_path ="./bunny.mat";
+	file = matopen(pc_path);src = read(file,"src");close(file);
+	src = PC2SVector(src)
+end;
+
+# ╔═╡ ddafa33a-7827-41bf-9307-503796178790
 begin 
 	function params(T)
 		max_iter = 100;
@@ -135,416 +38,48 @@ begin
 		aa = (νₛ = T(3.0), νₑ = T(1.0/(3.0*sqrt(3.0))), m = 5, d = 6, νₜₕ=T(1e-6),α=T(0.5))
 		return (max_iter = max_iter, f = f, aa = aa, stop = T(1e-5))
 	end;
-	par = params(eltype(source[1]))
+end;
+
+# ╔═╡ f1f2b7e2-3755-4ed4-aa8f-3a00627c9784
+md"## Functions"
+
+# ╔═╡ 5a765c21-6031-4fc3-9514-f41d42f54a7d
+function load_PC_Mat(Path,outliers_per,id)
+	pc_path = @sprintf("%s/%d/%d_dst.mat",Path,outliers_per,id)
+	r_path = @sprintf("%s/%d/%d_R.mat",Path,outliers_per,id)
+	file = matopen(pc_path)
+	dst = read(file,"dst")
+	T = eltype(dst)
+	dst = PC2SVector(dst)
+	close(file)
+	file = matopen(r_path)
+	R = SMatrix{3,3,T,9}(read(file,"R"))
+	close(file)
+	return dst,R
 end
 
-# ╔═╡ ec83c06c-7480-4b27-8f42-b0794330657a
-"""
-	Svector2PC(PC)
-Convert vector of Points in SMatrix to a Matrix
-"""
-function SVector2PC(P::Vector{SMatrix{D,1,T,D}}) where {T<:Number,D}
-	n = size(P,1);
-	PC = zeros(T,D,n)
-	Threads.@threads for i = 1:n
-		@inbounds PC[:,i] = P[i][:]'
-	end
-	return PC
-end
-
-# ╔═╡ 0388e7b0-95d7-46b9-9a37-00180052d6dc
-"""
-	get_pc_closest_point(X,Y,Tree)
-Find the index & point coordiante of the closest point for each point in `X::Vector{SMatrix}` from KDTree `Tree::KDTree`, which is built from point cloud `Y`. The indices are filled in `W`. Points are assigned in `Q`
-"""
-function get_pc_closest_point(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},Tree) where{T,D}
-	n = size(X,1)
-	Q = Array{SMatrix{D,1,T,D}}(undef,n)
-	W = zeros(T,n)
-	Threads.@threads for i = 1:n
-		@inbounds idx,dist = nn(Tree,X[i])
-		@inbounds W[i] = dist[1]
-		@inbounds Q[i] = Y[idx[1]]
-	end
-	return Q,W
-end
-
-# ╔═╡ ab7d59c1-e7fa-45f9-bb84-0af2bf8b8fce
-"""
-	get_pc_closest_point!(X,Y,Tree,Q,W)
-Find the index & point coordiante of the closest point for each point in `X::Vector{SMatrix}` from KDTree `Tree::KDTree`, which is built from point cloud `Y`. The indices are filled in `W`. Points are assigned in `Q`
-"""
-function get_pc_closest_point!(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},Tree,Q::Vector{SMatrix{D,1,T,D}},W::Vector{T}) where{T,D}
-	@inbounds Threads.@threads for i ∈ eachindex(X)
-		idx,dist = nn(Tree,X[i])
-		W[i] = dist[1]
-		Q[i] = Y[idx[1]]
-	end
-	return Q,W
-end
-
-# ╔═╡ bc29f7cd-5f96-491f-ac03-dd0f01f574ae
-"""
-	get_pc_closest_point_id(PC,Tree,W)
-Find the index of the closest point for each point in `P::Vector{SMatrix}` from KDTree `Tree::KDTree`. The indices are filled in `W`
-"""
-function get_pc_closest_point_id(P::Vector{SMatrix{3,1,T,3}},Tree) where{T}
-	n = size(P,1)
-	id = zeros(n)
-	Threads.@threads for i = 1:n
-		@inbounds idx = nn(Tree,P[i])[1][1]
-		@inbounds id[i] = idx
-	end
-	return id
-end
-
-# ╔═╡ 8a7ce52a-403f-45e7-b9b8-b4b5b46c69ac
-"""
-	transform_PC!(PC,R,t)
-Inplace transformation of a Point Cloud `PC` under rotation `R` and translation `t`
-
-See also [`transform_PC`](@ref)
-"""
-function transform_PC!(PC::Vector{SMatrix{3,1,T,3}}, R::T₂, t::T₃) where {T<:Number,T₂<:AbstractMatrix{T},T₃<:AbstractMatrix{T}}
-	Threads.@threads for i ∈ eachindex(PC)
-		@inbounds PC[i] = R*PC[i] .+ t;
-	end
-end
-
-# ╔═╡ 65e95d65-c0ec-4568-a52e-3b9242f68494
-"""
-	rt2T(R,t)
-Combine a rotation matrix `R` and a translation vector `t` to a homogenous matrix `T`
-"""
-function rt2T(R::T₁,t::SMatrix{D,1,T,D}) where {D,T₁<:AbstractMatrix,T<:Number}
-	row = zeros(1,D+1); row[1,D+1] = T(1.0);
-	row = SMatrix{1,D+1,T,D+1}(row);
-	return vcat(hcat(R,t),row)
-end
-
-# ╔═╡ fbdbf4fd-bd9e-4844-890a-a7731279089d
-"""
-	P2P_ICP(source,target, w)
-Point to Point ICP with SVD. **Points in source and points in target are listed correspoindingly, given weight `w`**
-"""
-function P2P_ICP(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},w::Vector{T}=ones(T,size(source,1))) where {T<:Number,D}
-	wₙ = w/sum(w);
-	meanₛ = sum(X.*wₙ);X = X.-[meanₛ];
-	meanₜ = sum(Y.*wₙ);Y = Y.-[meanₜ];
-	Σ = reduce(hcat, X) * reduce(hcat, Y.*wₙ)'
-	F = svd(Σ);
-	U = SMatrix{D,D,T,D*D}(F.U);
-	V = SMatrix{D,D,T,D*D}(F.V);
-	if det(U)*det(V) < 0
-		s = ones(T,D); s[end] = -s[end];
-		S = SMatrix{D,D,T,D*D}(diagm(s))
-		R = V*S*U';
-	else
-		R = V*U';
-	end
-	t = meanₜ-R*meanₛ
-	X = X.+ [meanₛ]; Y = Y.+ [meanₜ];
-	return rt2T(R,t)
-end
-
-# ╔═╡ d1886891-e260-4104-866a-ead8284af0ce
-"""
-	T2rt(T)
-Decompose a homogenous transformation matrix `T` into a rotation matrix `R` and a translational vector `t`
-"""
-function T2rt(T)
-	R = T[SOneTo(3),SOneTo(3)]
-	t = T[SOneTo(3),4]
-	return R,t
-end
-
-# ╔═╡ 1e902be5-c98d-421a-8ef4-7294e6855640
+# ╔═╡ 66062a59-1442-4e6d-af89-65db3ff61c6a
 begin
-"""
-transform_PC(PC,R,t)
-Transforming a Point Cloud `PC` under rotation `R` and translation `t`
-
-See also [`transform_PC!`](@ref)
-"""
-	function transform_PC(PC::Vector{SMatrix{3,1,T,3}}, R::T₂, t::T₃) where {T<:Number,T₂<:AbstractMatrix{T},T₃<:AbstractMatrix{T}}
-		n = size(PC,1)
-		PC_ = Array{SMatrix{3,1,T,3}}(undef,n)
-		Threads.@threads for i ∈ eachindex(PC)
-			@inbounds PC_[i] = R*PC[i] .+ t;
-		end
-		return PC_
-	end
-	function transform_PC(PC::Vector{SMatrix{3,1,T₁,3}}, T::T₂) where {T₁<:Number,T₂<:AbstractMatrix{T₁}}
-		n = size(PC,1)
-		R,t = T2rt(T)
-		PC_ = Array{SMatrix{3,1,T₁,3}}(undef,n)
-		Threads.@threads for i ∈ eachindex(PC)
-			@inbounds PC_[i] = R*PC[i] .+ t;
-		end
-		return PC_
-	end
+	Path = "/home/ssz990220/Project/JuliaPointCloud/Scan-matcher/data/random"
+	outliers_pers = [0,20,60,70,80,90,95,96,97,98,99]
+	id = collect(1:40)
+	local iterator = collect(Iterators.product(outliers_pers,id))
+	par = params(eltype(src[1]))
+	# for i ∈ eachindex(iterator)
+	# for i = 1:2
+	i = 1
+		outliers_per = iterator[i][1]; id = iterator[i][2]
+		dst,R = load_PC_Mat(Path,outliers_per,id)
+		Rᵢ = FICP_P2P(src,dst,par)
+		# @show Rᵢ,R
+	# end
 end
 
-# ╔═╡ 56844bba-6900-4c19-8925-03d5ae307599
-"""
-	transform_PC!(PC,T)
-Inplace transformation of a Point Cloud `PC` under transformation `T`
+# ╔═╡ 3f890e7b-af9e-43b9-b976-589caf3115ba
+R
 
-See also [`transform_PC`](@ref)
-"""
-function transform_PC!(PC::Vector{SMatrix{3,1,T₁,3}}, T::T₂) where {T₁<:Number,T₂<:AbstractMatrix{T₁}}
-	R,t = T2rt(T)
-	Threads.@threads for i ∈ eachindex(PC)
-		@inbounds PC[i] = R*PC[i] .+ t;
-	end
-end
-
-# ╔═╡ 26fece0f-2e3c-4966-81fa-ce794b2079c6
-begin
-	function tukey_energy(r::Vector{T},p::T) where {T}
-		r = (1 .-(r./p).^2).^2;
-		r[r.>p] = T(0.0);
-		return r
-	end
-	function trimmed_energy(r::Vector{T},p::T) where {T}
-		return zeros(T,size(r,1))
-		## TODO: finish trimmed_energy function
-	end
-	fair_energy(r,p) = @inline sum(r.^2) ./ (1 .+r./p);
-	logistic_energy(r,p) = @inline sum(r.^2 .*(p./r)*tanh.(r./p));
-	welsch_energy(r::Vector{T},p::T) where {T} = @inline sum(T(1.0).-exp.(-r.^2 ./(T(2.0) .*p.*p)));
-	autowelsch_energy(r::Vector{T},p::T) where {T} = welsch_energy(r,T(0.5));
-	uniform_energy(r::Vector{T}) where {T} = @inline ones(T,size(r,1))
-	md"Energy functions here"
-end
-
-# ╔═╡ 53f8e4b5-d39b-44a6-b8d7-017a94883293
-"""
-	get_energy(W,ν₁,f)
-get point cloud error energy given error `W`, parameter `ν₁`, with function specified by `f`
-"""
-function get_energy(W,ν₁,f)
-	if f == "tukey"
-		return tukey_energy(W,ν₁)
-	elseif f == "fair"
-		return fair_energy(W,ν₁)
-	elseif f == "log"
-		return logistic_energy(W,ν₁)
-	elseif f == "trimmed"
-		return trimmed_energy(W,ν₁)
-	elseif f == "welsch"
-		return welsch_energy(W,ν₁)
-	elseif f == "auto_welsch"
-		return autowelsch_energy(W,ν₁)
-	elseif f == "uniform"
-		return uniform_energy(W)
-	else
-		return uniform_energy(W)
-	end
-end
-
-# ╔═╡ 433792e0-0877-4ac8-971a-978e4fcf60bd
-"""
-	median(v)
-Find the median value of a vector `v`. `v` should be sorted ahead.
-"""
-function median(v::Vector{T}) where {T}
-	n = size(v,1)
-	if iseven(n)
-		return (v[n÷2] + v[n÷2+1])/T(2.0) 
-	else
-		return (v[(n+1)÷2] + v[(n-1)÷2])/T(2.0)
-	end
-end
-
-# ╔═╡ b7bb98d7-9469-4611-ab27-ddca18b9cfb5
-begin
-	uniform_weight(r::Vector{T}) where {T} = @inline ones(T,size(r,1))
-	pnorm_weight(r::Vector{T},p::T,reg=T(1e-16)) where {T} = @inline p./(r.^(2-p) .+ reg)
-	tukey_weight(r::Vector{T},p::T) where {T} = @inline (T(1.0) .- (r ./ p).^(T(2.0))).^T(2.0)
-	fair_weight(r::Vector{T},p::T) where {T} = @inline T(1.0) ./ (T(1.0) .+ r ./ p)
-	logistic_weight(r::Vector{T},p::T) where {T} = @inline (p ./ r) .* tanh.(r./p)
-	welsch_weight(r::Vector{T},p::T) where {T} = @inline exp.(-(r.*r)./(2*p*p))
-	autowelsch_weight(r::Vector{T},p::T) where {T} = welsch_weight(r,p*median(r)/T(sqrt(2.0)*2.3))
-	function trimmed_weight(r::Vector{T},p::T) where {T}
-		return error
-	end
-	md"weight functions here"
-end
-
-# ╔═╡ 22dd669d-f9ec-4b54-b161-7a4ffa8ef708
-"""
-	robust_weight!(W,ν₁,f)
-get point cloud robust weight given error `W`, parameter `ν₁`, with function specified by `f`
-"""
-function robust_weight!(W,ν₁,f)
-	if f == "tukey"
-		W.= tukey_weight(W,ν₁)
-	elseif f == "fair"
-		W.=  fair_weight(W,ν₁)
-	elseif f == "log"
-		W.=  logistic_weight(W,ν₁)
-	elseif f == "trimmed"
-		W.=  trimmed_weight(W,ν₁)
-	elseif f == "welsch"
-		W.=  welsch_weight(W,ν₁)
-	elseif f == "auto_welsch"
-		W.=  autowelsch_weight(W,ν₁)
-	elseif f == "uniform"
-		W.=  uniform_weight(W)
-	else
-		W.=  uniform_weight(W)
-	end
-end
-
-# ╔═╡ 33020dfe-eaef-47b6-800f-8329109de36b
-function FindKnearestMed(P::Vector{SMatrix{3,1,T,3}},Tree,k) where {T}
-	n = size(P,1)
-	Xnearest = Vector{T}(undef,n)
-	Threads.@threads for i = 1:n
-		idxs, dists = knn(Tree, P[i], k, true)
-		Xnearest[i] = median(dists[1])
-	end
-	return sqrt(median(Xnearest))
-end
-
-# ╔═╡ 16e90931-721e-4dbf-b921-b68f119a4476
-function MatrixLog3(R::AbstractMatrix{T}) where {T<:Number}
-	acosinput = (tr(R) - T(1.0)) / T(2.0);
-	if acosinput >= 1
-		so3mat = zeros(T,3,3);
-	elseif acosinput <= -1
-		if ~NearZero(T(1.0) + R[3, 3])
-			omg = (T(1.0) / sqrt(T(2.0) * (T(1.0) + R[3, 3])))* [R[1,3]; R[2,3]; T(1.0) + R[3,3]];
-		elseif ~NearZero(T(1.0) + R[2, 2])
-			omg = (T(1.0) / sqrt(T(2.0) * (T(1.0) + R[2, 2])))* [R[1, 2]; T(1.0) + R[2, 2]; R[3, 2]];
-		else
-			omg = (T(1.0) / sqrt(T(2.0) * (T(1.0) + R[1, 1])))* [T(1.0) + R[1, 1]; R[2, 1]; R[3, 1]];
-		end
-		so3mat = mcross(pi * omg);
-	else
-		theta = acos(acosinput);
-		so3mat = theta * (T(1.0) / (T(2.0) * sin(theta))) * (R - R');
-	end
-	return so3mat
-end
-
-# ╔═╡ 9eba2bdd-1ccf-4621-8df0-9ed3eec8707a
-function wrapto1(a::T) where {T<:Number}
-	if a > 1 
-		return T(1.0)
-	elseif a < -1
-		return T(-1.0)
-	else
-		return a
-	end
-end
-
-# ╔═╡ 7b50b05c-b3bf-468c-95da-7ddcf72479a0
-function MatrixLog6(T::AbstractMatrix{D}) where {D<:Number}
-	R, p = T2rt(T);
-	omgmat = MatrixLog3(R);
-	if isequal(omgmat, zeros(D,3,3))
-		R = @SMatrix zeros(D,3,3)
-		expmat = vcat(hcat(R,T[SOneTo(3), 4]) ,@SMatrix zeros(D,1,4));
-	else
-		theta = acos(wrapto1((tr(R) - 1.0f0) / 2.0f0));
-		expmat = vcat(hcat(omgmat,(I - omgmat ./ 2.0f0 + (1.0f0 / theta - cot(theta / 2.0f0) / 2.0f0) * omgmat * omgmat / theta) * p),@SMatrix zeros(D,1,4));
-	end
-	return expmat
-end
-
-# ╔═╡ 9f17db92-7724-4459-bc50-1a8fa27944ac
-se32vec(se3) = @SMatrix [-se3[2,3];se3[1,3];-se3[1,2];se3[1,4];se3[2,4];se3[3,4]]
-
-# ╔═╡ 832d9d3d-5379-49a9-8a82-6486a835573e
-vec2se3(vec::StaticArray{Tuple{D, 1}, T, 2}) where {T,D}  = @SMatrix [T(0.0) -vec[3] vec[2] vec[4]; 
-										vec[3] T(0.0) -vec[1] vec[5];
-										-vec[2] vec[1] T(0.0) vec[6]; 
-										T(0.0) T(0.0) T(0.0) T(0.0)]
-
-# ╔═╡ 2350385e-81e0-47ce-b13d-0cbbbfed4894
-function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,D}},param) where {T<:Number,D}
-	## Setup Buffer
-	n = size(source,1)
-	X = deepcopy(source)
-	Y = target; Tree = KDTree(SVector2PC(Y));
-	if haskey(par,:init)
-		Tₘ = par.init ? par.T : MMatrix{D+1,D+1,T,(D+1)^2}(I)
-	else
-		Tₘ = MMatrix{D+1,D+1,T,(D+1)^2}(I)
-	end
-	local energys = zeros(T,par.max_iter)
-	local last_energy = typemax(T)
-	local T_p2p = @SMatrix zeros(T,D+1,D+1)
-	local Tₗₐₛₜ = @MMatrix zeros(T,D+1,D+1)
-	local Q = Vector{SMatrix{D,1,T,D}}(undef,n)
-	local W = zeros(T,n)
-	
-	## Initial Closest Point and Weights
-	get_pc_closest_point!(X,Y,Tree,Q,W)
-	
-	## Welsch Parameters
-	ν₂ = par.aa.νₑ * FindKnearestMed(target,Tree,7)
-	ν₁ = par.aa.νₛ * median(W)
-	ν₁ = ν₁ > ν₂ ? ν₁ : ν₂
-
-	## AA Buffers
-	d = D == 3 ? 6 : 4 		# 3D & 2D only
-	theta = @MMatrix zeros(T,1,par.aa.m)
-	scales = @MMatrix zeros(T,1,par.aa.m)
-	local U = @MMatrix zeros(T,d,1)
-	local Tᵥ = @MMatrix zeros(T,d,1)
-	local Gs = @MMatrix zeros(T,d,par.aa.m,)
-	local Fs = @MMatrix zeros(T,d,par.aa.m,)
-	local iter = 0
-	local counter = 0
-
-	## Main Loop
-	while true
-		iter = 1
-		for i = 1:par.max_iter
-			acceptₐₐ = false
-			energy = get_energy(W,ν₁,"welsch")
-			if energy < last_energy
-				last_energy = energy
-				acceptₐₐ = true
-			else
-				U .= se32vec(MatrixLog6(T_p2p))
-				X_ = transform_PC(X,T_p2p)
-				get_pc_closest_point!(X_,Y,Tree,Q,W)
-				last_energy = get_energy(W,ν₁,"welsch")
-			end
-			energys[i] = last_energy
-			robust_weight!(W,ν₁,"welsch")
-			T_p2p = P2P_ICP(X,Q,W)
-			Tᵥ .= AA_Acc!(se32vec(MatrixLog6(T_p2p)),Fs,Gs,U,scales,iter,par)
-			Tₘ = exp(vec2se3(Tᵥ))
-			
-			X_ = transform_PC(X,Tₘ)
-			get_pc_closest_point!(X_,Y,Tree,Q,W)
-			iter += 1
-			counter += 1
-			## Global Stop Criteria
-			stop = norm(Tₘ-Tₗₐₛₜ)
-			Tₗₐₛₜ .= Tₘ
-			if stop<par.stop
-				break
-			end
-		end
-		if abs(ν₁-ν₂) < par.aa.νₜₕ
-			break
-		else
-			ν₁ = ν₁*par.aa.α > ν₂ ? ν₁*par.aa.α : ν₂
-			last_energy = typemax(T)
-		end
-	end
-	@show counter
-	return Tₘ
-end
-
-# ╔═╡ aba902a4-7dd2-42cc-84bc-62c6c5957e4b
-FICP_P2P(source,target,par)
+# ╔═╡ 5b6f5e1b-e7e1-46cd-a74c-5283c097bda9
+@inline getAngularError(R,Rt) = abs(acos(minimum(maximum(tr((Rt'*R)-1)/2,-1),1)))/π*180
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -554,8 +89,10 @@ FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 Flux3D = "432009dd-59a1-4b72-8c93-6462ce9b220f"
 GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MAT = "23992714-dd62-5051-b70f-ba57cb901cac"
 MeshIO = "7269a6da-0436-5bbc-96c2-40638cbb6118"
 NearestNeighbors = "b8a86587-4115-5ab1-83bc-aa920d37bbce"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 ProfileCanvas = "efd6af41-a80b-495e-886c-e51b0c7d77a3"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
@@ -568,11 +105,12 @@ BenchmarkTools = "~1.3.2"
 FileIO = "~1.16.0"
 Flux3D = "~0.1.6"
 GeometryBasics = "~0.4.5"
+MAT = "~0.10.3"
 MeshIO = "~0.4.10"
 NearestNeighbors = "~0.4.12"
 ProfileCanvas = "~0.1.6"
 Rotations = "~1.3.3"
-StaticArrays = "~1.5.9"
+StaticArrays = "~1.5.10"
 """
 
 # ╔═╡ 00000000-0000-0000-0000-000000000002
@@ -581,7 +119,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.8.2"
 manifest_format = "2.0"
-project_hash = "b96ad0a318dc0bdbe26394dd2b1678c8afc833c9"
+project_hash = "147cbfb1fae0641a3e7abac3b62044b0f0496233"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -627,6 +165,11 @@ deps = ["JSON", "Logging", "Printf", "Profile", "Statistics", "UUIDs"]
 git-tree-sha1 = "d9a9701b899b30332bbcb3e1679c41cce81fb0e8"
 uuid = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 version = "1.3.2"
+
+[[deps.BufferedStreams]]
+git-tree-sha1 = "bb065b14d7f941b8617bc323063dbe79f55d16ea"
+uuid = "e1450e63-4bb3-523b-b2a4-4ffa8c0fd77d"
+version = "1.1.0"
 
 [[deps.CEnum]]
 git-tree-sha1 = "eb4cb44a499229b3b8426dcfb5dd85333951ff90"
@@ -689,9 +232,9 @@ version = "0.3.0"
 
 [[deps.Compat]]
 deps = ["Dates", "LinearAlgebra", "UUIDs"]
-git-tree-sha1 = "3ca828fe1b75fa84b021a7860bd039eaea84d2f2"
+git-tree-sha1 = "aaabba4ce1b7f8a9b34c015053d3b1edf60fa49c"
 uuid = "34da2185-b29b-5c13-b0c7-acf172513d20"
-version = "4.3.0"
+version = "4.4.0"
 
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
@@ -752,9 +295,9 @@ uuid = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 
 [[deps.Distributions]]
 deps = ["ChainRulesCore", "DensityInterface", "FillArrays", "LinearAlgebra", "PDMats", "Printf", "QuadGK", "Random", "SparseArrays", "SpecialFunctions", "Statistics", "StatsBase", "StatsFuns", "Test"]
-git-tree-sha1 = "bee795cdeabc7601776abbd6b9aac2ca62429966"
+git-tree-sha1 = "a7756d098cbabec6b3ac44f369f74915e8cfd70a"
 uuid = "31c24e10-a181-5473-b8eb-7969acd0382f"
-version = "0.25.77"
+version = "0.25.79"
 
 [[deps.DocStringExtensions]]
 deps = ["LibGit2"]
@@ -869,6 +412,18 @@ git-tree-sha1 = "d796f7be0383b5416cd403420ce0af083b0f9b28"
 uuid = "4d00f742-c7ba-57c2-abde-4428a4b178cb"
 version = "0.8.5"
 
+[[deps.HDF5]]
+deps = ["Compat", "HDF5_jll", "Libdl", "Mmap", "Random", "Requires"]
+git-tree-sha1 = "19effd6b5af759c8aaeb9c77f89422d3f975ab65"
+uuid = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+version = "0.16.12"
+
+[[deps.HDF5_jll]]
+deps = ["Artifacts", "JLLWrappers", "LibCURL_jll", "Libdl", "OpenSSL_jll", "Pkg", "Zlib_jll"]
+git-tree-sha1 = "4cc2bb72df6ff40b055295fdef6d92955f9dede8"
+uuid = "0234f1f7-429e-5d53-9886-15a909be8d59"
+version = "1.12.2+2"
+
 [[deps.HypergeometricFunctions]]
 deps = ["DualNumbers", "LinearAlgebra", "OpenLibm_jll", "SpecialFunctions", "Test"]
 git-tree-sha1 = "709d864e3ed6e3545230601f94e11ebc65994641"
@@ -973,12 +528,18 @@ uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 
 [[deps.LogExpFunctions]]
 deps = ["ChainRulesCore", "ChangesOfVariables", "DocStringExtensions", "InverseFunctions", "IrrationalConstants", "LinearAlgebra"]
-git-tree-sha1 = "94d9c52ca447e23eac0c0f074effbcd38830deb5"
+git-tree-sha1 = "946607f84feb96220f480e0422d3484c49c00239"
 uuid = "2ab3a3ac-af41-5b50-aa03-7779005ae688"
-version = "0.3.18"
+version = "0.3.19"
 
 [[deps.Logging]]
 uuid = "56ddb016-857b-54e1-b83d-db4d58db5568"
+
+[[deps.MAT]]
+deps = ["BufferedStreams", "CodecZlib", "HDF5", "SparseArrays"]
+git-tree-sha1 = "971be550166fe3f604d28715302b58a3f7293160"
+uuid = "23992714-dd62-5051-b70f-ba57cb901cac"
+version = "0.10.3"
 
 [[deps.MacroTools]]
 deps = ["Markdown", "Random"]
@@ -1064,6 +625,12 @@ deps = ["Artifacts", "Libdl"]
 uuid = "05823500-19ac-5b8b-9628-191a04bc5112"
 version = "0.8.1+0"
 
+[[deps.OpenSSL_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
+git-tree-sha1 = "f6e9dba33f9f2c44e08a020b0caf6903be540004"
+uuid = "458c3c95-2e84-50aa-8efc-19380b2a3a95"
+version = "1.1.19+0"
+
 [[deps.OpenSpecFun_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "13652491f6856acfd2db29360e1bbcd4565d04f1"
@@ -1083,9 +650,9 @@ version = "0.11.16"
 
 [[deps.Parsers]]
 deps = ["Dates", "SnoopPrecompile"]
-git-tree-sha1 = "cceb0257b662528ecdf0b4b4302eb00e767b38e7"
+git-tree-sha1 = "b64719e8b4504983c7fca6cc9db3ebc8acc2a4d6"
 uuid = "69de0a69-1ddd-5017-9359-2bf0b02dc9f0"
-version = "2.5.0"
+version = "2.5.1"
 
 [[deps.Pkg]]
 deps = ["Artifacts", "Dates", "Downloads", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "REPL", "Random", "SHA", "Serialization", "TOML", "Tar", "UUIDs", "p7zip_jll"]
@@ -1196,9 +763,9 @@ uuid = "6462fe0b-24de-5631-8697-dd941f90decc"
 
 [[deps.SortingAlgorithms]]
 deps = ["DataStructures"]
-git-tree-sha1 = "b3363d7460f7d098ca0912c69b082f75625d7508"
+git-tree-sha1 = "a4ada03f999bd01b3a25dcaa30b2d929fe537e00"
 uuid = "a2af1166-a08f-5f64-846c-94a0d3cef48c"
-version = "1.0.1"
+version = "1.1.0"
 
 [[deps.SparseArrays]]
 deps = ["LinearAlgebra", "Random"]
@@ -1218,9 +785,9 @@ version = "0.3.3"
 
 [[deps.StaticArrays]]
 deps = ["LinearAlgebra", "Random", "StaticArraysCore", "Statistics"]
-git-tree-sha1 = "f86b3a049e5d05227b10e15dbb315c5b90f14988"
+git-tree-sha1 = "4e051b85454b4e4f66e6a6b7bdc452ad9da3dcf6"
 uuid = "90137ffa-7385-5640-81b9-e52037218182"
-version = "1.5.9"
+version = "1.5.10"
 
 [[deps.StaticArraysCore]]
 git-tree-sha1 = "6b7ba252635a5eff6a0b0664a41ee140a1c9e72a"
@@ -1316,10 +883,10 @@ uuid = "83775a58-1f1d-513f-b197-d71354ab007a"
 version = "1.2.12+3"
 
 [[deps.Zygote]]
-deps = ["AbstractFFTs", "ChainRules", "ChainRulesCore", "DiffRules", "Distributed", "FillArrays", "ForwardDiff", "GPUArrays", "GPUArraysCore", "IRTools", "InteractiveUtils", "LinearAlgebra", "LogExpFunctions", "MacroTools", "NaNMath", "Random", "Requires", "SparseArrays", "SpecialFunctions", "Statistics", "ZygoteRules"]
-git-tree-sha1 = "66cc604b9a27a660e25a54e408b4371123a186a6"
+deps = ["AbstractFFTs", "ChainRules", "ChainRulesCore", "DiffRules", "Distributed", "FillArrays", "ForwardDiff", "GPUArrays", "GPUArraysCore", "IRTools", "InteractiveUtils", "LinearAlgebra", "LogExpFunctions", "MacroTools", "NaNMath", "Random", "Requires", "SnoopPrecompile", "SparseArrays", "SpecialFunctions", "Statistics", "ZygoteRules"]
+git-tree-sha1 = "758128eb2a9e022e3cadaef8f80f4c8741ed05f7"
 uuid = "e88e6eb3-aa80-5325-afca-941959d7151f"
-version = "0.6.49"
+version = "0.6.50"
 
 [[deps.ZygoteRules]]
 deps = ["MacroTools"]
@@ -1344,43 +911,14 @@ version = "17.4.0+0"
 """
 
 # ╔═╡ Cell order:
-# ╟─5436358a-86ed-4724-a4b1-58ed3cb18d32
-# ╠═e4532490-63e8-11ed-2f97-632853f48f1d
-# ╟─012ef84b-48cb-4932-9879-48acc2e1f39d
-# ╠═b0ef0120-4385-457f-8104-217de22ba4fa
-# ╠═ba227a2d-91f9-49c5-ad9b-b2192d205eb9
-# ╟─191c1a65-d627-4595-88df-d5b5c73edcdf
-# ╠═654f8ec6-ee3a-4570-b122-03cab1955c47
-# ╟─c462804d-5ea6-4fb7-baf9-861c9c961fe7
-# ╠═2350385e-81e0-47ce-b13d-0cbbbfed4894
-# ╠═aba902a4-7dd2-42cc-84bc-62c6c5957e4b
-# ╟─11aebf61-cf36-450f-aa36-af3508844553
-# ╠═521daff7-e4dc-43b3-aa7c-3e543c5b6ffe
-# ╟─f39ff907-bc7c-49bd-b813-65ad03f4b190
-# ╠═bf054703-1880-4b01-8cd8-35fcf7c37973
-# ╠═1eee9776-8495-45dc-86dc-b05c16bea058
-# ╠═77986ac9-66ed-46b1-9a2f-e9a7dfa812d2
-# ╠═5674df53-78ab-404e-859b-7b8abdaad2b3
-# ╠═ec83c06c-7480-4b27-8f42-b0794330657a
-# ╠═0388e7b0-95d7-46b9-9a37-00180052d6dc
-# ╠═ab7d59c1-e7fa-45f9-bb84-0af2bf8b8fce
-# ╠═bc29f7cd-5f96-491f-ac03-dd0f01f574ae
-# ╠═1e902be5-c98d-421a-8ef4-7294e6855640
-# ╠═8a7ce52a-403f-45e7-b9b8-b4b5b46c69ac
-# ╟─56844bba-6900-4c19-8925-03d5ae307599
-# ╠═fbdbf4fd-bd9e-4844-890a-a7731279089d
-# ╟─65e95d65-c0ec-4568-a52e-3b9242f68494
-# ╟─d1886891-e260-4104-866a-ead8284af0ce
-# ╟─53f8e4b5-d39b-44a6-b8d7-017a94883293
-# ╟─22dd669d-f9ec-4b54-b161-7a4ffa8ef708
-# ╟─b7bb98d7-9469-4611-ab27-ddca18b9cfb5
-# ╟─26fece0f-2e3c-4966-81fa-ce794b2079c6
-# ╟─33020dfe-eaef-47b6-800f-8329109de36b
-# ╟─433792e0-0877-4ac8-971a-978e4fcf60bd
-# ╠═16e90931-721e-4dbf-b921-b68f119a4476
-# ╠═7b50b05c-b3bf-468c-95da-7ddcf72479a0
-# ╠═9eba2bdd-1ccf-4621-8df0-9ed3eec8707a
-# ╟─9f17db92-7724-4459-bc50-1a8fa27944ac
-# ╠═832d9d3d-5379-49a9-8a82-6486a835573e
+# ╠═98fab5ee-6f19-11ed-3bd1-4bc59df01a5c
+# ╠═ffecec34-68e5-49a9-9269-8781fdb0a33b
+# ╠═ed24feb1-b1c8-4657-93bc-a40abcbb7f76
+# ╠═ddafa33a-7827-41bf-9307-503796178790
+# ╠═66062a59-1442-4e6d-af89-65db3ff61c6a
+# ╠═3f890e7b-af9e-43b9-b976-589caf3115ba
+# ╟─f1f2b7e2-3755-4ed4-aa8f-3a00627c9784
+# ╠═5a765c21-6031-4fc3-9514-f41d42f54a7d
+# ╠═5b6f5e1b-e7e1-46cd-a74c-5283c097bda9
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
