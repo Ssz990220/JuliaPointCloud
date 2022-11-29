@@ -155,7 +155,7 @@ end
 	P2P_ICP(source,target, w)
 Point to Point ICP with SVD. **Points in source and points in target are listed correspoindingly, given weight `w`**
 """
-function P2P_ICP(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},w::Vector{T}=ones(T,size(source,1))) where {T<:Number,D}
+function P2P_ICP(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},w::Vector{T}=ones(T,size(X,1))) where {T<:Number,D}
 	wₙ = w/sum(w);
 	meanₛ = sum(X.*wₙ);X = X.-[meanₛ];
 	meanₜ = sum(Y.*wₙ);Y = Y.-[meanₜ];
