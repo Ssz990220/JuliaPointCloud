@@ -1,7 +1,6 @@
 using Random, LinearAlgebra, BenchmarkTools, Test, Statistics, StaticArrays
 using NearestNeighbors
 using StaticArrays
-using Flux3D
 using Rotations
 using ProfileCanvas
 using MeshIO,FileIO,GeometryBasics
