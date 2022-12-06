@@ -12,11 +12,11 @@ using MeshIO,FileIO,GeometryBasics
 Load a point cloud from given Path. Returns a point cloud `P` and # of Points `n`
 """
 function load_PC(Path)
-    P = load(Path)
-	PC = P.position
-	P = Point2PC(PC)
-    P = PointCloud(P)
-    n = size(P.points,2)
+	PC = load(Path).position
+    n = size(PC,1)
+	D = size(first(PC),1);
+	T = eltype(first(PC));
+	P = SMatrix{D,1,T,D}.(PC);	## Format Conversion
     return P, n
 end
 

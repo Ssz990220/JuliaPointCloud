@@ -11,10 +11,8 @@ include("../Scripts/utils.jl")
 include("PC_Visualization.jl")
 
 begin
-	PC, N = load_PC("./Assets/source.ply")
-	source = PC2SVector(PC.points[:,:,1]);
-	PCₜ, Nₜ = load_PC("./Assets/target.ply")
-	target = PC2SVector(PCₜ.points[:,:,1])
+	source, N = load_PC("./Assets/point cloud/shell/1.ply")
+	target, Nₜ = load_PC("./Assets/target.ply")
 end;
 
 fig,scene,plotobj = visualize(PC,markersize=0.01)
