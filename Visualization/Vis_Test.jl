@@ -1,14 +1,6 @@
-begin
-    using Random, LinearAlgebra, BenchmarkTools, Test, Statistics, StaticArrays
-    using NearestNeighbors
-    using StaticArrays
-    using Rotations
-    using ProfileCanvas
-    using MeshIO,FileIO,GeometryBasics
-end
-
-include("../Scripts/utils.jl")
+# include("../Scripts/utils.jl")
 include("PC_Visualization.jl")
+using .PCVisualizer
 
 begin
 	source, N = load_PC("./Assets/source.ply")

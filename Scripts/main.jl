@@ -1,20 +1,10 @@
-begin
-    using Random, LinearAlgebra, BenchmarkTools, Test, Statistics, StaticArrays
-    using NearestNeighbors
-    using StaticArrays
-    using Flux3D
-    using Rotations
-    using ProfileCanvas
-    using MeshIO,FileIO,GeometryBasics
-end
-include("utils.jl")
 include("FRICP.jl")
-
+using .FRICP
 begin
 	PC, N = load_PC("./Assets/source.ply")
-	source = PC2SVector(PC.points[:,:,1]);
+	source = PC;
 	PCₜ, Nₜ = load_PC("./Assets/target.ply")
-	target = PC2SVector(PCₜ.points[:,:,1])
+	target = PCₜ
 end;
 
 ## Parameters in this cell
@@ -29,4 +19,4 @@ begin
 	par = params(eltype(source[1]))
 end
 
-@btime FICP_P2P(source,target,par)
+FICP_P2P(source,target,par)
