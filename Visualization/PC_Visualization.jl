@@ -1,5 +1,3 @@
-using Makie, GLMakie
-
 """
 
     visualize(PC::Vector{SMatrix{D,1,T,D}};kwargs...)
@@ -25,9 +23,9 @@ function visualize(PC::Vector{SMatrix{D,1,T,D}};kwargs...) where {T,D}
 
     ## MarkerSize
     pc = zeros(T,D,n)
-	@inbounds for i = 1:n
-		pc[:,i] = PC[i]
-	end
+    @inbounds for i = 1:n
+        pc[:,i] = PC[i]
+    end
     markersize = (maximum(maximum(pc,dims = 2) .- minimum(pc,dims=2)))/1e3
 
     ## Observables

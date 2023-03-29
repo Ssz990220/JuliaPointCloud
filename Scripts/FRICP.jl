@@ -1,14 +1,3 @@
-begin
-    using Random, LinearAlgebra, BenchmarkTools, Test, Statistics, StaticArrays
-    using NearestNeighbors
-    using StaticArrays
-    using Flux3D
-    using Rotations
-    using ProfileCanvas
-    using MeshIO,FileIO,GeometryBasics
-end
-include("utils.jl")
-
 function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,D}},par) where {T<:Number,D}
 	## Setup Buffer
 	n = size(source,1)

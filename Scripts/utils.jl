@@ -1,10 +1,3 @@
-using Random, LinearAlgebra, BenchmarkTools, Test, Statistics, StaticArrays
-using NearestNeighbors
-using StaticArrays
-using Rotations
-using ProfileCanvas
-using MeshIO,FileIO,GeometryBasics
-
 @inline SRange(n) = StaticArrays.SUnitRange(n,n)
 
 """
