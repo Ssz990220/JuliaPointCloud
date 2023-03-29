@@ -1,4 +1,4 @@
-function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,D}},par) where {T<:Number,D}
+function FICP_P2P(source::Vector{SVector{D,T}},target::Vector{SVector{D,T}},par) where {T<:Float,D}
 	## Setup Buffer
 	n = size(source,1)
 	X = deepcopy(source)
@@ -12,7 +12,7 @@ function FICP_P2P(source::Vector{SMatrix{D,1,T,D}},target::Vector{SMatrix{D,1,T,
 	local last_energy = typemax(T)
 	local T_p2p = @SMatrix zeros(T,D+1,D+1)
 	local Tₗₐₛₜ = @MMatrix zeros(T,D+1,D+1)
-	local Q = Vector{SMatrix{D,1,T,D}}(undef,n)
+	local Q = Vector{SVector{D,T}}(undef,n)
 	local W = zeros(T,n)
 	
 	## Initial Closest Point and Weights

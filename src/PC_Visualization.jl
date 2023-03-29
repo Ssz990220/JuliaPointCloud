@@ -13,7 +13,7 @@ Dimension of points in PointCloud `PC` must be 3.
 - obj(MeshscatterObj)   - MeshScatter Container
 """
 
-function visualize(PC::Vector{SMatrix{D,1,T,D}};kwargs...) where {T,D}
+function visualize(PC::Vector{SVector{D,T}};kwargs...) where {T,D}
     @assert D==3
     n = size(PC,1)
 
@@ -78,7 +78,7 @@ Dimension of points in PointCloud `PC` must be 3.
 
 """
 
-function visualize!(axis,plotobj,PC::Vector{SMatrix{D,1,T,D}};kwargs...) where {T,D}
+function visualize!(axis,plotobj,PC::Vector{SVector{D,T}};kwargs...) where {T,D}
     @assert D==3
     n = size(PC,1)
 

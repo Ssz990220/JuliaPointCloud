@@ -9,7 +9,7 @@ function load_PC(Path)
     n = size(PC,1)
 	D = size(first(PC),1);
 	T = eltype(first(PC));
-	P = SMatrix{D,1,T,D}.(PC);	## Format Conversion
+	P = SVector{D,T}.(PC);	## Format Conversion
     return P, n
 end
 
@@ -17,11 +17,11 @@ end
     PC2SVector(PC)
 Convert a point cloud to array of StaticMatrices
 """
-function PC2SVector(PC::Matrix{T}) where {T<:Number}
+function PC2SVector(PC::Matrix{T}) where {T<:Float}
     n = size(PC,2);
-    PCVec = Array{SMatrix{3,1,T,3}}(undef,n)
+    PCVec = Vector{SVector{3,T}}(undef,n)
     Threads.@threads for i = 1:n
-        @inbounds PCVec[i] = @SMatrix [PC[1,i];PC[2,i];PC[3,i]]
+        @inbounds PCVec[i] = @SVector [PC[1,i] for i = 1:3]
     end
     return PCVec
 end
@@ -39,7 +39,7 @@ end
 	Svector2PC(PC)
 Convert vector of Points in SMatrix to a Matrix
 """
-function SVector2PC(P::Vector{SMatrix{D,1,T,D}}) where {T<:Number,D}
+function SVector2PC(P::Vector{SVector{D,T}}) where {T<:Float,D}
 	n = size(P,1);
 	PC = zeros(T,D,n)
 	Threads.@threads for i = 1:n
@@ -52,9 +52,9 @@ end
 	get_pc_closest_point(X,Y,Tree)
 Find the index & point coordiante of the closest point for each point in `X::Vector{SMatrix}` from KDTree `Tree::KDTree`, which is built from point cloud `Y`. The indices are filled in `W`. Points are assigned in `Q`
 """
-function get_pc_closest_point(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},Tree) where{T,D}
+function get_pc_closest_point(X::Vector{SVector{D,T}},Y::Vector{SVector{D,T}},Tree) where{T,D}
 	n = size(X,1)
-	Q = Array{SMatrix{D,1,T,D}}(undef,n)
+	Q = Vector{SVector{D,T}}(undef,n)
 	W = zeros(T,n)
 	Threads.@threads for i = 1:n
 		@inbounds idx,dist = nn(Tree,X[i])
@@ -68,7 +68,7 @@ end
 	get_pc_closest_point!(X,Y,Tree,Q,W)
 Find the index & point coordiante of the closest point for each point in `X::Vector{SMatrix}` from KDTree `Tree::KDTree`, which is built from point cloud `Y`. The indices are filled in `W`. Points are assigned in `Q`
 """
-function get_pc_closest_point!(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},Tree,Q::Vector{SMatrix{D,1,T,D}},W::Vector{T}) where{T,D}
+function get_pc_closest_point!(X::Vector{SVector{D,T}},Y::Vector{SVector{D,T}},Tree,Q::Vector{SVector{D,T}},W::Vector{T}) where{T,D}
 	@inbounds Threads.@threads for i ∈ eachindex(X)
 		idx,dist = nn(Tree,X[i])
 		W[i] = dist[1]
@@ -82,7 +82,7 @@ end
 	get_pc_closest_point_id(PC,Tree,W)
 Find the index of the closest point for each point in `P::Vector{SMatrix}` from KDTree `Tree::KDTree`. The indices are filled in `W`
 """
-function get_pc_closest_point_id(P::Vector{SMatrix{3,1,T,3}},Tree) where{T}
+function get_pc_closest_point_id(P::Vector{SVector{D,T}},Tree) where{T,D}
 	n = size(P,1)
 	id = zeros(n)
 	Threads.@threads for i = 1:n
@@ -99,18 +99,38 @@ Transforming a Point Cloud `PC` under rotation `R` and translation `t`
 
 See also [`transform_PC!`](@ref)
 """
-	function transform_PC(PC::Vector{SMatrix{3,1,T,3}}, R::T₂, t::T₃) where {T<:Number,T₂<:AbstractMatrix{T},T₃<:AbstractMatrix{T}}
+	function transform_PC(PC::Vector{SVector{3,T}}, R::T₂, t::T₃) where {T<:Float,T₂<:SMatrix{3,3,T,9},T₃<:SVector{3,T}}
 		n = size(PC,1)
-		PC_ = Array{SMatrix{3,1,T,3}}(undef,n)
+		PC_ = Vector{SVector{3,T}}(undef,n)
 		Threads.@threads for i ∈ eachindex(PC)
 			@inbounds PC_[i] = R*PC[i] .+ t;
 		end
 		return PC_
 	end
-	function transform_PC(PC::Vector{SMatrix{3,1,T₁,3}}, T::T₂) where {T₁<:Number,T₂<:AbstractMatrix{T₁}}
+	
+	function transform_PC(PC::Vector{SVector{2,T}}, R::T₂, t::T₃) where {T<:Float,T₂<:SMatrix{2,2,T,4},T₃<:SVector{2,T}}
+		n = size(PC,1)
+		PC_ = Vector{SVector{2,T}}(undef,n)
+		Threads.@threads for i ∈ eachindex(PC)
+			@inbounds PC_[i] = R*PC[i] .+ t;
+		end
+		return PC_
+	end
+
+	function transform_PC(PC::Vector{SVector{3,T₁}}, T::T₂) where {T₁<:Float,T₂<:SMatrix{4,4,T₁,16}}
 		n = size(PC,1)
 		R,t = T2rt(T)
-		PC_ = Array{SMatrix{3,1,T₁,3}}(undef,n)
+		PC_ = Vector{SVector{3,T₁}}(undef,n)
+		Threads.@threads for i ∈ eachindex(PC)
+			@inbounds PC_[i] = R*PC[i] .+ t;
+		end
+		return PC_
+	end
+
+	function transform_PC(PC::Vector{SVector{2,T₁}}, T::T₂) where {T₁<:Float,T₂<:SMatrix{3,3,T₁,9}}
+		n = size(PC,1)
+		R,t = T2rt(T)
+		PC_ = Vector{SVector{2,T₁}}(undef,n)
 		Threads.@threads for i ∈ eachindex(PC)
 			@inbounds PC_[i] = R*PC[i] .+ t;
 		end
@@ -124,7 +144,12 @@ Inplace transformation of a Point Cloud `PC` under rotation `R` and translation 
 
 See also [`transform_PC`](@ref)
 """
-function transform_PC!(PC::Vector{SMatrix{3,1,T,3}}, R::T₂, t::T₃) where {T<:Number,T₂<:AbstractMatrix{T},T₃<:AbstractMatrix{T}}
+function transform_PC!(PC::Vector{SVector{3,T}}, R::T₂, t::T₃) where {T<:Float,T₂<:SMatrix{3,3,T,9},T₃<:SVector{3,T}}
+	Threads.@threads for i ∈ eachindex(PC)
+		@inbounds PC[i] = R*PC[i] .+ t;
+	end
+end
+function transform_PC!(PC::Vector{SVector{2,T}}, R::T₂, t::T₃) where {T<:Float,T₂<:SMatrix{2,2,T,4},T₃<:SVector{2,T}}
 	Threads.@threads for i ∈ eachindex(PC)
 		@inbounds PC[i] = R*PC[i] .+ t;
 	end
@@ -136,7 +161,14 @@ Inplace transformation of a Point Cloud `PC` under transformation `T`
 
 See also [`transform_PC`](@ref)
 """
-function transform_PC!(PC::Vector{SMatrix{3,1,T₁,3}}, T::T₂) where {T₁<:Number,T₂<:AbstractMatrix{T₁}}
+function transform_PC!(PC::Vector{SVector{3,T₁}}, T::T₂) where {T₁<:Float,T₂<:SMatrix{4,4,T₁,16}}
+	R,t = T2rt(T)
+	Threads.@threads for i ∈ eachindex(PC)
+		@inbounds PC[i] = R*PC[i] .+ t;
+	end
+end
+
+function transform_PC!(PC::Vector{SVector{2,T₁}}, T::T₂) where {T₁<:Float,T₂<:SMatrix{3,3,T₁,9}}
 	R,t = T2rt(T)
 	Threads.@threads for i ∈ eachindex(PC)
 		@inbounds PC[i] = R*PC[i] .+ t;
@@ -147,7 +179,7 @@ end
 	P2P_ICP(source,target, w)
 Point to Point ICP with SVD. **Points in source and points in target are listed correspoindingly, given weight `w`**
 """
-function P2P_ICP(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},w::Vector{T}=ones(T,size(X,1))) where {T<:Number,D}
+function P2P_ICP(X::Vector{SVector{D,T}},Y::Vector{SVector{D,T}},w::Vector{T}=ones(T,size(X,1))) where {T<:Float,D}
 	wₙ = w/sum(w);
 	meanₛ = sum(X.*wₙ);X = X.-[meanₛ];
 	meanₜ = sum(Y.*wₙ);Y = Y.-[meanₜ];
@@ -165,26 +197,6 @@ function P2P_ICP(X::Vector{SMatrix{D,1,T,D}},Y::Vector{SMatrix{D,1,T,D}},w::Vect
 	t = meanₜ-R*meanₛ
 	X = X.+ [meanₛ]; Y = Y.+ [meanₜ];
 	return rt2T(R,t)
-end
-
-"""
-	rt2T(R,t)
-Combine a rotation matrix `R` and a translation vector `t` to a homogenous matrix `T`
-"""
-function rt2T(R::T₁,t::SMatrix{D,1,T,D}) where {D,T₁<:AbstractMatrix,T<:Number}
-	row = zeros(1,D+1); row[1,D+1] = T(1.0);
-	row = SMatrix{1,D+1,T,D+1}(row);
-	return vcat(hcat(R,t),row)
-end
-
-"""
-	T2rt(T)
-Decompose a homogenous transformation matrix `T` into a rotation matrix `R` and a translational vector `t`
-"""
-function T2rt(T)
-	R = T[SOneTo(3),SOneTo(3)]
-	t = T[SOneTo(3),4]
-	return R,t
 end
 
 """
@@ -265,75 +277,12 @@ begin
 	uniform_energy(r::Vector{T}) where {T} = @inline ones(T,size(r,1))
 end
 
-function FindKnearestMed(P::Vector{SMatrix{3,1,T,3}},Tree,k) where {T}
+function FindKnearestMed(P::Vector{SVector{D,T}},Tree,k) where {T,D}
 	n = size(P,1)
 	Xnearest = Vector{T}(undef,n)
 	Threads.@threads for i = 1:n
 		idxs, dists = knn(Tree, P[i], k, true)
-		Xnearest[i] = median(dists[1])
+		Xnearest[i] = median(dists)
 	end
 	return sqrt(median(Xnearest))
 end
-
-"""
-	median(v)
-Find the median value of a vector `v`. `v` should be sorted ahead.
-"""
-function median(v::Vector{T}) where {T}
-	n = size(v,1)
-	if iseven(n)
-		return (v[n÷2] + v[n÷2+1])/T(2.0) 
-	else
-		return (v[(n+1)÷2] + v[(n-1)÷2])/T(2.0)
-	end
-end
-
-function MatrixLog3(R::AbstractMatrix{T}) where {T<:Number}
-	acosinput = (tr(R) - T(1.0)) / T(2.0);
-	if acosinput >= 1
-		so3mat = zeros(T,3,3);
-	elseif acosinput <= -1
-		if ~NearZero(T(1.0) + R[3, 3])
-			omg = (T(1.0) / sqrt(T(2.0) * (T(1.0) + R[3, 3])))* [R[1,3]; R[2,3]; T(1.0) + R[3,3]];
-		elseif ~NearZero(T(1.0) + R[2, 2])
-			omg = (T(1.0) / sqrt(T(2.0) * (T(1.0) + R[2, 2])))* [R[1, 2]; T(1.0) + R[2, 2]; R[3, 2]];
-		else
-			omg = (T(1.0) / sqrt(T(2.0) * (T(1.0) + R[1, 1])))* [T(1.0) + R[1, 1]; R[2, 1]; R[3, 1]];
-		end
-		so3mat = mcross(pi * omg);
-	else
-		theta = acos(acosinput);
-		so3mat = theta * (T(1.0) / (T(2.0) * sin(theta))) * (R - R');
-	end
-	return so3mat
-end
-
-function MatrixLog6(T::AbstractMatrix{D}) where {D<:Number}
-	R, p = T2rt(T);
-	omgmat = MatrixLog3(R);
-	if isequal(omgmat, zeros(D,3,3))
-		R = @SMatrix zeros(D,3,3)
-		expmat = vcat(hcat(R,T[SOneTo(3), 4]) ,@SMatrix zeros(D,1,4));
-	else
-		theta = acos(wrapto1((tr(R) - 1.0f0) / 2.0f0));
-		expmat = vcat(hcat(omgmat,(I - omgmat ./ 2.0f0 + (1.0f0 / theta - cot(theta / 2.0f0) / 2.0f0) * omgmat * omgmat / theta) * p),@SMatrix zeros(D,1,4));
-	end
-	return expmat
-end
-
-function wrapto1(a::T) where {T<:Number}
-	if a > 1 
-		return T(1.0)
-	elseif a < -1
-		return T(-1.0)
-	else
-		return a
-	end
-end
-
-se32vec(se3) = @SMatrix [-se3[2,3];se3[1,3];-se3[1,2];se3[1,4];se3[2,4];se3[3,4]]
-
-vec2se3(vec::StaticArray{Tuple{D, 1}, T, 2}) where {T,D}  = @SMatrix [T(0.0) -vec[3] vec[2] vec[4]; 
-										vec[3] T(0.0) -vec[1] vec[5];
-										-vec[2] vec[1] T(0.0) vec[6]; 
-										T(0.0) T(0.0) T(0.0) T(0.0)]
