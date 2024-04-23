@@ -3,9 +3,20 @@
 	rt2T(R,t)
 Combine a rotation matrix `R` and a translation vector `t` to a homogenous matrix `T`
 """
-function rt2T(R::SMatrix{D,D,T,D₁},t::SVector{D,T}) where {D,T<:Float,D₁}
+function rt2T(R::StaticArray{Tuple{D,D},T,2},t::SVector{D,T}) where {D,T<:Float}
 	row = zeros(1,D+1); row[1,D+1] = T(1.0);
 	row = SMatrix{1,D+1,T,D+1}(row);
+	return vcat(hcat(R,t),row)
+end
+
+function rt2T(R::StaticArray{Tuple{3, 3},T,2},t::SVector{3,T}) where {T<:Float}
+	row = SMatrix{1,D+1,T,D+1}(0.0,0.0,0.0,1.0);
+	return vcat(hcat(R,t),row)
+end
+
+
+function rt2T(R::StaticArray{Tuple{2, 2},T,2},t::SVector{2,T}) where {T<:Float}
+	row = SMatrix{1,D+1,T,D+1}(0.0,0.0,1.0);
 	return vcat(hcat(R,t),row)
 end
 
